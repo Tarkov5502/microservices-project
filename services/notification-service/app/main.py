@@ -73,14 +73,29 @@ async def liveness() -> dict:
 
 @app.get("/health/ready")
 async def readiness() -> dict:
-    # If the consumer task crashed, report degraded
-    if _consumer_task and _consumer_task.done():
-        exc = _consumer_task.exception()
-        if exc:
-            from fastapi import HTTPException, status
+    """
+    SECURITY: Never expose raw exception messages to HTTP callers — they may
+    contain internal hostnames, connection strings, or stack traces that aid
+    infrastructure reconnaissance. Log internally, return generic status.
+
+    BUG FIX: _consumer_task.exception() raises asyncio.CancelledError if the
+    task was cancelled (e.g. during graceful shutdown). That would propagate as
+    an unhandled 500. We catch it separately and treat cancellation as healthy.
+    """
+    if _consumer_task is None:
+        return {"status": "starting", "consumer": "not_yet_created"}
+    if _consumer_task.done():
+        try:
+            exc = _consumer_task.exception()
+        except asyncio.CancelledError:
+            # Task was cancelled cleanly — this is expected during shutdown
+            return {"status": "stopping", "consumer": "cancelled"}
+        if exc is not None:
+            logger.error("Consumer task has crashed: %s", exc)
+            from fastapi import HTTPException, status as http_status
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Consumer crashed: {exc}",
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Message consumer is unavailable",
             )
     return {"status": "ready", "consumer": "running"}
 

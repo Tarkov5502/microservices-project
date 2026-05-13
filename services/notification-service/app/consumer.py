@@ -107,10 +107,15 @@ class ServiceBusConsumer:
     async def _on_task_created(self, data: dict) -> None:
         assignee_id = data.get("assignee_id")
         if assignee_id:
+            # SECURITY: Sanitize user-supplied strings before including in log
+            # messages or notifications. A crafted task title containing newlines
+            # or ANSI escape codes can corrupt log output and confuse analysis.
+            raw_title = str(data.get("title", ""))
+            safe_title = raw_title.replace("\n", " ").replace("\r", " ")[:200]
             await self.notifier.send(
-                recipient_id=assignee_id,
+                recipient_id=str(assignee_id),
                 subject="You have been assigned a new task",
-                body=f"Task '{data.get('title')}' has been assigned to you.",
+                body=f"Task '{safe_title}' has been assigned to you.",
             )
 
     async def _on_task_status_changed(self, data: dict) -> None:

@@ -34,4 +34,11 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
 # Use exec form (not shell form) so signals are received properly by uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# SECURITY / CORRECTNESS: Use a single worker for asyncio applications.
+# Multiple workers create separate OS processes, each with their own in-memory
+# state. This breaks:
+#   - The rate limiter (each worker has its own bucket dict — effective limit is N×)
+#   - The ServiceBus sender singleton (duplicated AMQP connections per worker)
+#   - Prometheus metrics (counters are not shared across processes)
+# asyncio already provides concurrency within a single worker via the event loop.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

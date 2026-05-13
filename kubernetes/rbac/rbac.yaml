@@ -19,11 +19,14 @@ metadata:
   name: api-gateway
   namespace: microservices
   annotations:
-    # Azure Workload Identity: binds K8s SA to Azure Managed Identity.
-    # Pods with this SA can authenticate to Azure services (Key Vault!)
-    # WITHOUT any passwords or secrets in the pod!
     azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
-automountServiceAccountToken: true
+# SECURITY: Disable automatic service account token mounting.
+# These services authenticate to Azure via Workload Identity (federated OIDC),
+# not via the Kubernetes API. The automounted token is:
+#   1. Readable by any process running in the pod
+#   2. Grants the RoleBinding permissions to any compromised container
+# If a service genuinely needs K8s API access, mount the token explicitly.
+automountServiceAccountToken: false
 
 ---
 apiVersion: v1
@@ -33,6 +36,7 @@ metadata:
   namespace: microservices
   annotations:
     azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+automountServiceAccountToken: false
 
 ---
 apiVersion: v1
@@ -42,6 +46,7 @@ metadata:
   namespace: microservices
   annotations:
     azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+automountServiceAccountToken: false
 
 ---
 apiVersion: v1
@@ -51,49 +56,141 @@ metadata:
   namespace: microservices
   annotations:
     azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+automountServiceAccountToken: false
 
 ---
 # ─── Role: read-secrets ───────────────────────────────────────────────────────
-# A Role defines what actions are allowed on what resources.
-# This role allows reading Secrets — needed by services to get DB passwords
-# from Kubernetes Secrets (injected from Key Vault via CSI driver).
+# SECURITY: Each service only gets access to the specific secret keys it needs.
+# A single "read all secrets" binding violates least privilege — the api-gateway
+# shouldn't be able to read the DB password, and the notification-service
+# shouldn't be able to read the JWT signing key.
+#
+# IMPLEMENTATION NOTE: Kubernetes Roles can't scope to individual keys within a
+# Secret object — they grant access to the entire Secret resource. The correct
+# approach is to create one Secret per service containing only that service's
+# credentials, then bind each ServiceAccount to only its own Secret by name.
+
+# api-gateway needs: jwt-secret
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: secret-reader
+  name: api-gateway-secrets
   namespace: microservices
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]   # read-only! No create/update/delete.
+    resourceNames: ["app-secrets"]  # Scope to the specific Secret object
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list"]
 
 ---
-# ─── RoleBinding: bind secret-reader to each service's SA ────────────────────
-# A RoleBinding grants a Role to subjects (users, groups, or ServiceAccounts).
+# user-service needs: db-connection-string, redis-connection-string, jwt-secret
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: user-service-secrets
+  namespace: microservices
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["app-secrets"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+
+---
+# task-service needs: db-connection-string, redis-connection-string, sb-sender-connection-string
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: task-service-secrets
+  namespace: microservices
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["app-secrets"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+
+---
+# notification-service needs: sb-listener-connection-string only
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: notification-service-secrets
+  namespace: microservices
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["app-secrets"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: services-can-read-secrets
+  name: api-gateway-secrets
   namespace: microservices
 subjects:
   - kind: ServiceAccount
     name: api-gateway
     namespace: microservices
+roleRef:
+  kind: Role
+  name: api-gateway-secrets
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: user-service-secrets
+  namespace: microservices
+subjects:
   - kind: ServiceAccount
     name: user-service
     namespace: microservices
+roleRef:
+  kind: Role
+  name: user-service-secrets
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-service-secrets
+  namespace: microservices
+subjects:
   - kind: ServiceAccount
     name: task-service
     namespace: microservices
+roleRef:
+  kind: Role
+  name: task-service-secrets
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: notification-service-secrets
+  namespace: microservices
+subjects:
   - kind: ServiceAccount
     name: notification-service
     namespace: microservices
 roleRef:
   kind: Role
-  name: secret-reader
+  name: notification-service-secrets
   apiGroup: rbac.authorization.k8s.io
 
 ---

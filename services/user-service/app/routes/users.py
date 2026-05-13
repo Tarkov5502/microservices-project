@@ -13,6 +13,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _parse_user_id(raw: str) -> uuid.UUID:
+    """
+    Parse the X-User-Id header value into a UUID.
+    Returns 400 instead of an unhandled 500 on malformed input.
+    The API Gateway always sends a valid UUID from the verified JWT 'sub' claim,
+    but defensive parsing prevents crashes during manual testing or misconfiguration.
+    """
+    try:
+        return uuid.UUID(raw)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid X-User-Id header — expected a UUID",
+        )
+
+
 async def _get_user_or_404(user_id: uuid.UUID, db: AsyncSession) -> User:
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -27,12 +43,29 @@ async def get_me(
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Return the currently authenticated user (ID injected by API Gateway)."""
-    user = await _get_user_or_404(uuid.UUID(x_user_id), db)
+    user = await _get_user_or_404(_parse_user_id(x_user_id), db)
     return UserResponse.model_validate(user)
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-async def get_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> UserResponse:
+async def get_user(
+    user_id: uuid.UUID,
+    x_user_id: str = Header(..., alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """
+    Fetch another user's public profile.
+
+    SECURITY: Only allow users to look up themselves, or allow the requester
+    if they have admin role. Since the task service needs to look up assignees,
+    this endpoint is intentionally kept accessible to any authenticated user,
+    but the response schema excludes is_admin and hashed_password.
+
+    In a stricter system, add a role check here:
+        if str(user_id) != x_user_id and "admin" not in roles:
+            raise 403
+    The tradeoff is registered here for the learner's awareness.
+    """
     user = await _get_user_or_404(user_id, db)
     return UserResponse.model_validate(user)
 
@@ -43,11 +76,13 @@ async def update_me(
     x_user_id: str = Header(..., alias="X-User-Id"),
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    user = await _get_user_or_404(uuid.UUID(x_user_id), db)
+    user = await _get_user_or_404(_parse_user_id(x_user_id), db)
     if payload.full_name is not None:
         user.full_name = payload.full_name
     if payload.password is not None:
-        user.hashed_password = bcrypt.hashpw(payload.password.encode(), bcrypt.gensalt(12)).decode()
+        user.hashed_password = bcrypt.hashpw(
+            payload.password.encode(), bcrypt.gensalt(rounds=12)
+        ).decode()
     await db.flush()
     await db.refresh(user)
     return UserResponse.model_validate(user)
@@ -59,6 +94,6 @@ async def deactivate_me(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Soft-delete: deactivate rather than destroying data."""
-    user = await _get_user_or_404(uuid.UUID(x_user_id), db)
+    user = await _get_user_or_404(_parse_user_id(x_user_id), db)
     user.is_active = False
     logger.info("User deactivated: %s", user.email)

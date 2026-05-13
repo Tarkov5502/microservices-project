@@ -75,9 +75,13 @@ jobs:
         run: ruff format app/ --check
 
       - name: Run tests
-        run: |
-          pytest tests/ -v --tb=short || echo "No tests found yet — add them!"
-        continue-on-error: true   # Don't block CI while tests are being written
+        # SECURITY FIX: Removed '|| echo' and continue-on-error.
+        # The previous pattern silently masked ALL test failures — including
+        # security-related tests — meaning broken auth, SQL injection guards,
+        # or BOLA checks would never block a merge to main.
+        # If there are no tests yet, create a placeholder that actually passes:
+        #   mkdir -p tests && echo "def test_placeholder(): pass" > tests/test_placeholder.py
+        run: pytest tests/ -v --tb=short
 
   # ─── Job 2: Docker build validation ───────────────────────────────────────
   docker-build:

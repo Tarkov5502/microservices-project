@@ -114,7 +114,31 @@ spec:
           port: 8002
 
 ---
-# ─── Allow all services to reach PostgreSQL (egress) ─────────────────────────
+# ─── Allow api-gateway to reach notification-service ─────────────────────────
+# FIX: This policy was missing. ROUTE_MAP in the gateway includes
+# /api/v1/notifications but the default-deny-all blocked all traffic.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-gateway-to-notification-service
+  namespace: microservices
+spec:
+  podSelector:
+    matchLabels:
+      app: notification-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 8003
+
+---
+# ─── Allow services to reach PostgreSQL (egress) ───────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -127,7 +151,14 @@ spec:
   policyTypes:
     - Egress
   egress:
-    - ports:
+    # SECURITY: Scope to the database subnet CIDR. Without a 'to:' field,
+    # this would allow egress to ANY IP on port 5432, letting a compromised
+    # pod connect to an external PostgreSQL listener and exfiltrate data.
+    # Replace with your actual db_subnet_cidr from Terraform.
+    - to:
+        - ipBlock:
+            cidr: 10.0.8.0/24   # dev; use 10.1.8.0/24 for prod
+      ports:
         - protocol: TCP
           port: 5432
 

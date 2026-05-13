@@ -5,7 +5,6 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response
-from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
@@ -37,7 +36,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# SECURITY: No CORSMiddleware on internal services. See user-service comment.
 app.include_router(tasks_router,    prefix="/api/v1/tasks",    tags=["Tasks"])
 app.include_router(projects_router, prefix="/api/v1/projects", tags=["Projects"])
 
@@ -54,8 +53,12 @@ async def readiness() -> dict:
             await conn.execute(text("SELECT 1"))
         return {"status": "ready"}
     except Exception as exc:
+        logger.error("Database health check failed: %s", exc)
         from fastapi import HTTPException, status
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
 
 
 @app.get("/metrics", include_in_schema=False)

@@ -39,17 +39,37 @@ class UserResponse(BaseModel):
     username: str
     full_name: str | None
     is_active: bool
-    is_admin: bool
+    # is_admin is intentionally excluded from the public response schema.
+    # Exposing it lets any authenticated user enumerate who is an admin,
+    # which aids privilege escalation planning.
     created_at: datetime
     last_login_at: datetime | None
 
     model_config = {"from_attributes": True}  # Allows creating from SQLAlchemy model
 
 
+class AdminUserResponse(UserResponse):
+    """Extended response including is_admin — only returned to admin callers."""
+    is_admin: bool
+
+
 class UserUpdate(BaseModel):
     """Partial update — all fields optional."""
     full_name: str | None = Field(None, max_length=255)
+    # Apply the SAME password complexity rules as UserCreate. Skipping them here
+    # would allow users to downgrade to weak passwords via the update endpoint.
     password: str | None = Field(None, min_length=8, max_length=100)
+
+    @field_validator("password")
+    @classmethod
+    def password_complexity(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one digit")
+        return v
 
 
 class LoginRequest(BaseModel):

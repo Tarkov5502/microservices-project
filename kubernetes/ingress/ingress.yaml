@@ -87,6 +87,17 @@ metadata:
     # Body size limit (prevent massive payloads)
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
 
+    # SECURITY: Block external access to the /metrics endpoint.
+    # The Prometheus metrics endpoint exposes request rates, error rates,
+    # event types, and timing data — valuable for attackers planning targeted
+    # requests or inferring service topology. Only cluster-internal scrapers
+    # should reach it (they bypass this Ingress entirely via ClusterIP).
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location /metrics {
+        deny all;
+        return 403;
+      }
+
 spec:
   tls:
     - hosts:

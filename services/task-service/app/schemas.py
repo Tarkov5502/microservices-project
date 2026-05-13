@@ -23,7 +23,9 @@ class ProjectResponse(BaseModel):
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     description: str | None = None
-    status: TaskStatus = TaskStatus.TODO
+    # SECURITY: status is NOT a client-settable field at creation time.
+    # All tasks start as TODO regardless of client input. Allowing clients
+    # to set status=DONE on creation bypasses any workflow enforcement.
     priority: TaskPriority = TaskPriority.MEDIUM
     project_id: uuid.UUID
     assignee_id: uuid.UUID | None = None
@@ -37,6 +39,10 @@ class TaskUpdate(BaseModel):
     priority: TaskPriority | None = None
     assignee_id: uuid.UUID | None = None
     due_date: datetime | None = None
+
+    # PATCH semantics: use model_dump(exclude_unset=True) NOT exclude_none=True.
+    # exclude_none would silently drop intentional null values (e.g. clearing
+    # an assignee or description), making it impossible to un-set nullable fields.
 
 
 class TaskResponse(BaseModel):

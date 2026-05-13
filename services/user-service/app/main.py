@@ -10,7 +10,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response
 from sqlalchemy import text
-from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
@@ -40,7 +39,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# SECURITY: Internal services must NOT expose CORS headers. They are only
+# reachable from the API Gateway inside the cluster via NetworkPolicy.
+# Enabling CORS here would allow any origin to bypass the gateway if the
+# service were ever accidentally exposed.
 app.include_router(auth_router,  prefix="/api/v1/auth",  tags=["Authentication"])
 app.include_router(users_router, prefix="/api/v1/users", tags=["Users"])
 
@@ -56,9 +58,16 @@ async def readiness() -> dict:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         return {"status": "ready"}
-    except Exception as e:
+    except Exception as exc:
+        # Log the full exception internally; return a generic message to the
+        # caller. Leaking DB hostnames, driver errors, or schema names in HTTP
+        # responses aids attackers in fingerprinting the infrastructure.
+        logger.error("Database health check failed: %s", exc)
         from fastapi import HTTPException, status
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
 
 
 @app.get("/metrics", include_in_schema=False)

@@ -82,15 +82,25 @@ app = FastAPI(
 )
 
 # ─── Middleware Stack (order matters — last added = first executed) ────────────
+# SECURITY: Do NOT combine allow_origins=["*"] with allow_credentials=True.
+# Starlette 0.37+ raises ValueError on startup for that combination.
+# This gateway does not use cookie-based auth, so credentials=False is correct.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.allowed_origins or [],  # Must be set via env var in prod
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
-app.add_middleware(RateLimiterMiddleware, max_requests=100, window_seconds=60)
-app.add_middleware(JWTAuthMiddleware, exempt_paths=["/health", "/health/ready", "/metrics"])
+app.add_middleware(
+    RateLimiterMiddleware,
+    max_requests=settings.rate_limit_requests,
+    window_seconds=settings.rate_limit_window_seconds,
+)
+app.add_middleware(
+    JWTAuthMiddleware,
+    exempt_paths=["/health", "/health/ready", "/metrics"],
+)
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 app.include_router(proxy_router)
@@ -159,6 +169,19 @@ async def readiness() -> dict:
 
 
 @app.get("/metrics", include_in_schema=False)
-async def metrics():
-    """Prometheus metrics endpoint."""
+async def metrics(request: Request):
+    """
+    Prometheus metrics endpoint.
+
+    SECURITY: Only accessible from within the cluster. The NGINX Ingress
+    Controller is configured to return 403 for external requests to /metrics
+    via the 'server-snippet' annotation. This application-level guard is a
+    second line of defence — check for the absence of X-Forwarded-For which
+    is set by the ingress for all externally-originated requests.
+    """
+    if request.headers.get("x-forwarded-for"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Metrics endpoint is not accessible externally",
+        )
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

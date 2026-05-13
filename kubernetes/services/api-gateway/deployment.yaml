@@ -66,14 +66,30 @@ spec:
           value: "app"
           effect: "NoSchedule"
 
+      # Pod-level security: run as non-root
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault  # Restrict syscalls to a safe default set
+
       containers:
         - name: api-gateway
-          # Image will be substituted by CI/CD pipeline
           image: REPLACE_ACR_LOGIN_SERVER/api-gateway:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
               name: http
+
+          # Container-level security hardening
+          securityContext:
+            allowPrivilegeEscalation: false  # Cannot gain more privileges than parent
+            readOnlyRootFilesystem: true      # Container cannot write to its filesystem
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]  # Drop every Linux capability (least privilege)
 
           # Resource requests = what the scheduler uses to place the pod
           # Resource limits = hard cap the container can NEVER exceed
