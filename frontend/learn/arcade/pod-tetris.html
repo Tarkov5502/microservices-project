@@ -489,6 +489,343 @@ footer.bottom #controls-hint b { color: var(--gold-warm); }
   padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 13px;
 }
 
+/* Cluster Autoscaler button */
+.autoscaler-btn {
+  font-family: "Cinzel", serif; font-size: 13px; font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 8px 14px;
+  background: linear-gradient(180deg, var(--cyan) 0%, #4a96a5 100%);
+  color: var(--bg-deep);
+  border: none; border-radius: 6px; cursor: pointer;
+  box-shadow: 0 2px 6px rgba(95, 179, 196, 0.3);
+  transition: transform 0.1s, box-shadow 0.15s, filter 0.15s;
+}
+.autoscaler-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.08); box-shadow: 0 4px 12px rgba(95, 179, 196, 0.45); }
+.autoscaler-btn:active:not(:disabled) { transform: translateY(1px); }
+.autoscaler-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.autoscaler-btn #bailouts-left { font-family: "JetBrains Mono", monospace; color: var(--bg-deep); }
+
+/* Combo escalation — combo number grows + pulses */
+header.top .stat.combo.escalating .val { animation: comboPulse 0.4s; }
+@keyframes comboPulse { 0% { transform: scale(1); } 40% { transform: scale(1.4); color: var(--gold-warm); } 100% { transform: scale(1); } }
+header.top .stat.combo .val { transition: color 0.2s; display: inline-block; }
+
+/* Pod affinity pair link visualization */
+.node .pod-mini.pair-target { outline: 2px dashed #b89f73; outline-offset: 2px; border-radius: 4px; }
+.node .pair-bonus-flag {
+  position: absolute; top: 4px; right: 6px;
+  font-size: 10px; color: #d4ab63; font-family: "JetBrains Mono", monospace;
+  background: rgba(212, 151, 47, 0.18); padding: 1px 5px; border-radius: 3px;
+}
+
+/* Perfect Wave celebration */
+@keyframes perfectWaveGlow {
+  0%   { box-shadow: inset 0 0 0 0 rgba(212, 151, 47, 0); }
+  30%  { box-shadow: inset 0 0 100px 30px rgba(212, 151, 47, 0.3); }
+  100% { box-shadow: inset 0 0 0 0 rgba(212, 151, 47, 0); }
+}
+#shell.perfect-wave-flash { animation: perfectWaveGlow 1.6s ease-out; }
+
+/* Difficulty meter (in tutorial banner) */
+.diff-meter {
+  display: inline-flex; gap: 3px; vertical-align: middle; margin: 0 6px;
+}
+.diff-meter .pip {
+  width: 6px; height: 14px; background: var(--line); border-radius: 2px;
+}
+.diff-meter .pip.on-easy   { background: var(--green); }
+.diff-meter .pip.on-med    { background: var(--gold); }
+.diff-meter .pip.on-hard   { background: var(--orange); }
+.diff-meter .pip.on-brutal { background: var(--red); }
+
+/* Apology overlay for the rare unsolvable-generator case */
+.apology-card {
+  max-width: 580px; margin: 20px 0;
+  background: rgba(95, 179, 196, 0.12); border-left: 3px solid var(--cyan);
+  padding: 16px 22px; border-radius: 0 6px 6px 0;
+  text-align: left; font-size: 14px; line-height: 1.6;
+}
+.apology-card strong { color: var(--cyan); font-family: "Cinzel", serif; }
+
+
+/* Always-visible CPU/mem on pod-mini */
+.node .pod-mini .mini-label {
+  position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
+  font-family: "JetBrains Mono", monospace; font-size: 9px; font-weight: 600;
+  background: rgba(0,0,0,0.65); color: var(--honey);
+  padding: 1px 5px; border-radius: 3px;
+  display: flex; align-items: center; gap: 1px;
+  text-shadow: none; white-space: nowrap;
+}
+.node .pod-mini .mini-cpu { color: var(--orange); }
+.node .pod-mini .mini-mem { color: var(--cyan); }
+.node .pod-mini .mini-sep { color: var(--muted); }
+
+/* Pod tooltip on hover */
+.node .pod-mini .pod-tooltip {
+  position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, -8px);
+  background: rgba(20, 35, 45, 0.97); color: var(--honey);
+  padding: 8px 12px; border-radius: 6px;
+  font-size: 11px; line-height: 1.5; text-align: center;
+  border: 1px solid var(--gold);
+  pointer-events: none; opacity: 0; transition: opacity 0.15s;
+  white-space: nowrap; z-index: 20;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.node .pod-mini:hover .pod-tooltip { opacity: 1; }
+.node .pod-mini .pod-tooltip b { color: var(--gold-warm); font-family: "JetBrains Mono", monospace; }
+
+/* Priority pod glow */
+.node .pod-mini.priority {
+  filter: drop-shadow(0 0 6px rgba(196, 90, 78, 0.6));
+}
+
+/* Pair pods get a persistent visual when both are on the same node */
+.node .pod-mini.paired-here::before {
+  content: ""; position: absolute; inset: -3px;
+  border: 2px dashed #e0c790; border-radius: 6px; pointer-events: none;
+  animation: pairFlash 0.6s ease-out;
+}
+@keyframes pairFlash { 0% { opacity: 0; transform: scale(1.4); } 100% { opacity: 1; transform: scale(1); } }
+
+/* Autoscaler button — pulse when player is stuck */
+.autoscaler-btn.urgent {
+  animation: autoscalerPulse 1.0s ease-in-out infinite;
+}
+@keyframes autoscalerPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 2px 6px rgba(95, 179, 196, 0.3); }
+  50%      { transform: scale(1.06); box-shadow: 0 4px 16px rgba(95, 179, 196, 0.7); }
+}
+
+/* Preemption tutorial overlay */
+.preempt-tutorial {
+  position: fixed; inset: 0; background: rgba(10, 20, 26, 0.85);
+  display: flex; align-items: center; justify-content: center; z-index: 200;
+  animation: fadeInOverlay 0.3s ease-out;
+}
+@keyframes fadeInOverlay { from { opacity: 0; } to { opacity: 1; } }
+.preempt-tutorial .card {
+  max-width: 480px; background: var(--bg-mid);
+  border: 2px solid var(--red); border-radius: 12px;
+  padding: 28px 32px; text-align: center;
+  box-shadow: 0 20px 80px rgba(196, 90, 78, 0.3);
+}
+.preempt-tutorial h3 {
+  font-family: "Cinzel", serif; font-size: 22px; color: var(--red);
+  letter-spacing: 0.08em; margin-bottom: 14px;
+}
+.preempt-tutorial p { font-size: 14px; line-height: 1.6; color: var(--honey); margin-bottom: 14px; }
+.preempt-tutorial p strong { color: var(--gold-warm); }
+.preempt-tutorial button {
+  background: var(--red); color: white; border: none;
+  padding: 10px 22px; border-radius: 6px; cursor: pointer;
+  font-family: "Cinzel", serif; font-size: 15px; letter-spacing: 0.05em;
+}
+.preempt-tutorial button:hover { background: #d56b5f; }
+
+/* Final board view inside game-over screen */
+.final-board {
+  display: flex; gap: 8px; max-width: 600px; margin: 16px auto;
+  padding: 12px; background: var(--bg-mid);
+  border: 1px solid var(--line); border-radius: 8px; overflow-x: auto;
+}
+.final-board .mini-node {
+  min-width: 90px;
+  background: var(--bg-deep); border: 1px solid var(--line);
+  padding: 6px; border-radius: 4px;
+  font-family: "JetBrains Mono", monospace; font-size: 10px;
+}
+.final-board .mini-node header {
+  display: flex; justify-content: space-between; margin-bottom: 4px;
+  color: var(--gold-warm); font-size: 11px;
+}
+.final-board .mini-node .mini-fill {
+  display: flex; gap: 1px; flex-wrap: wrap; margin-top: 4px;
+}
+.final-board .mini-node .mini-fill .blip {
+  width: 8px; height: 8px; border-radius: 1px;
+}
+.final-board .stuck-pod {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 8px; min-width: 90px;
+  background: rgba(196, 90, 78, 0.12); border: 1px dashed var(--red); border-radius: 4px;
+  font-size: 10px; color: var(--red);
+}
+.final-board .stuck-pod svg { margin-bottom: 4px; }
+
+/* Boon selection screen */
+.boon-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 740px; margin: 16px 0 28px; }
+.boon-card {
+  background: var(--bg-mid); border: 1px solid var(--line);
+  border-radius: 8px; padding: 18px 14px; cursor: pointer;
+  transition: all 0.15s; text-align: left;
+}
+.boon-card:hover { border-color: var(--gold); background: var(--bg-light); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(212, 151, 47, 0.2); }
+.boon-card .icon { font-size: 24px; margin-bottom: 8px; }
+.boon-card .name { font-family: "Cinzel", serif; font-size: 15px; color: var(--gold-warm); margin-bottom: 6px; letter-spacing: 0.04em; }
+.boon-card .desc { font-size: 13px; color: var(--honey); line-height: 1.45; opacity: 0.9; }
+.boon-card .scope { font-size: 11px; color: var(--muted); margin-top: 8px; font-style: italic; }
+
+/* Achievements display on title */
+.achievements-block {
+  margin-top: 24px; padding: 14px 20px;
+  background: rgba(28, 49, 66, 0.4); border: 1px solid var(--line);
+  border-radius: 8px; max-width: 580px; width: 100%;
+}
+.achievements-block h4 {
+  font-family: "Cinzel", serif; font-size: 12px; letter-spacing: 0.15em;
+  color: var(--gold-warm); text-transform: uppercase; margin-bottom: 10px;
+  text-align: center;
+}
+.achievements-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ach {
+  background: rgba(20, 35, 45, 0.6); border: 1px solid var(--line); border-radius: 4px;
+  padding: 8px 6px; font-size: 11px; text-align: center; opacity: 0.4;
+  transition: all 0.2s; position: relative;
+}
+.ach.unlocked { opacity: 1; border-color: var(--gold); background: rgba(212, 151, 47, 0.10); }
+.ach.unlocked .ach-icon { filter: none; }
+.ach .ach-icon { font-size: 20px; margin-bottom: 4px; filter: grayscale(1); }
+.ach.unlocked .ach-icon { filter: grayscale(0); }
+.ach .ach-name { font-family: "Cinzel", serif; font-size: 10px; letter-spacing: 0.04em; color: var(--honey); }
+
+/* Run modifiers strip — shows active boons */
+#run-modifiers {
+  position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 8px; pointer-events: none;
+}
+#run-modifiers .mod {
+  background: rgba(212, 151, 47, 0.15); border: 1px solid var(--gold);
+  color: var(--gold-warm); font-size: 11px; font-family: "JetBrains Mono", monospace;
+  padding: 4px 10px; border-radius: 12px;
+  animation: modAppear 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes modAppear { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* Endless mode banner */
+.endless-banner {
+  position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+  background: linear-gradient(90deg, var(--red), var(--gold)); color: var(--bg-deep);
+  font-family: "Cinzel", serif; font-weight: 600; letter-spacing: 0.1em;
+  padding: 4px 14px; border-radius: 12px; font-size: 11px; z-index: 11;
+}
+
+
+/* ─── Settings + music controls in the header ─────────────────────────── */
+.settings {
+  display: flex; gap: 8px; align-items: center;
+}
+.settings .btn {
+  background: transparent; border: 1px solid var(--line);
+  color: var(--muted); font-family: "JetBrains Mono", monospace;
+  font-size: 12px; padding: 5px 10px; border-radius: 4px;
+  cursor: pointer; transition: all 0.15s;
+}
+.settings .btn:hover { color: var(--honey); border-color: var(--gold); }
+.settings .btn.active { color: var(--gold-warm); border-color: var(--gold); background: rgba(212, 151, 47, 0.08); }
+.settings .vol {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--muted);
+}
+.settings .vol input[type=range] {
+  width: 60px; accent-color: var(--gold); height: 4px;
+}
+
+/* ─── Animated score number — smooth count-up via JS sets data-target ── */
+#hud-score, #hud-gold {
+  transition: color 0.2s, transform 0.2s;
+}
+#hud-score.changed, #hud-gold.changed {
+  color: var(--gold-warm) !important; transform: scale(1.08);
+}
+
+/* ─── Perfect pack — bigger flash, radial wipe ────────────────────────── */
+.node.perfect-wipe::after {
+  content: "PERFECT";
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: "Cinzel", serif; font-size: 20px; font-weight: 700;
+  color: var(--gold-warm); letter-spacing: 0.15em;
+  text-shadow: 0 0 12px rgba(212, 151, 47, 0.8);
+  animation: perfectTextPop 1.2s ease-out forwards;
+  pointer-events: none; z-index: 10;
+}
+@keyframes perfectTextPop {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  20%  { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+  70%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -80%) scale(0.8); }
+}
+.node.perfect-wipe::before {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(circle at center, rgba(230, 179, 77, 0.5) 0%, rgba(230, 179, 77, 0) 70%);
+  border-radius: 12px; pointer-events: none;
+  animation: perfectRadial 1.2s ease-out forwards;
+}
+@keyframes perfectRadial {
+  0% { transform: scale(0); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+/* ─── Node hover gets a gentle pulse ──────────────────────────────────── */
+.node[data-can-place="yes"]:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 24px rgba(74, 157, 106, 0.25), inset 0 0 0 1px rgba(74, 157, 106, 0.4);
+}
+
+/* ─── Combo escalation: counter grows visibly with chain length ──────── */
+header.top .stat.combo .val {
+  font-size: 22px;
+  transition: font-size 0.3s, color 0.3s, text-shadow 0.3s;
+}
+header.top .stat.combo .val.chain-2 { font-size: 26px; color: var(--gold-warm); }
+header.top .stat.combo .val.chain-3 { font-size: 30px; color: var(--orange); text-shadow: 0 0 8px rgba(224, 123, 58, 0.5); }
+header.top .stat.combo .val.chain-5 { font-size: 36px; color: var(--red); text-shadow: 0 0 12px rgba(196, 90, 78, 0.6); }
+header.top .stat.combo .val.chain-7 { font-size: 42px; color: #ff6b3a; text-shadow: 0 0 20px rgba(255, 107, 58, 0.8); animation: comboFire 0.8s ease-in-out infinite; }
+@keyframes comboFire {
+  0%, 100% { transform: scale(1) rotate(-1deg); }
+  50%      { transform: scale(1.05) rotate(1deg); }
+}
+
+/* ─── Settings drawer ────────────────────────────────────────────────── */
+#settings-drawer {
+  position: fixed; top: 60px; right: 24px;
+  background: rgba(20, 35, 45, 0.97); border: 1px solid var(--gold);
+  border-radius: 10px; padding: 18px;
+  min-width: 240px; z-index: 100;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  transform: translateY(-12px); opacity: 0; pointer-events: none;
+  transition: all 0.2s;
+}
+#settings-drawer.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
+#settings-drawer h4 {
+  font-family: "Cinzel", serif; font-size: 12px; letter-spacing: 0.15em;
+  color: var(--gold-warm); text-transform: uppercase; margin-bottom: 12px;
+}
+#settings-drawer label {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; color: var(--honey); margin: 10px 0;
+}
+#settings-drawer input[type=range] { width: 100px; accent-color: var(--gold); }
+#settings-drawer .toggle {
+  width: 40px; height: 22px; position: relative;
+  background: var(--bg-mid); border: 1px solid var(--line); border-radius: 12px;
+  cursor: pointer; transition: background 0.2s;
+}
+#settings-drawer .toggle::before {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; background: var(--muted); border-radius: 50%;
+  transition: all 0.2s;
+}
+#settings-drawer .toggle.on { background: rgba(212, 151, 47, 0.25); border-color: var(--gold); }
+#settings-drawer .toggle.on::before { left: 20px; background: var(--gold-warm); }
+#settings-drawer .now-playing {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+  font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--muted);
+}
+#settings-drawer .now-playing b { color: var(--gold-warm); font-family: "Lora", serif; font-weight: 600; font-style: italic; }
+
+
 @media (max-width: 900px) {
   main { grid-template-columns: 130px 1fr 130px; gap: 12px; }
   header.top .stats { gap: 12px; }
@@ -504,6 +841,11 @@ footer.bottom #controls-hint b { color: var(--gold-warm); }
     <div>
       <a class="back" href="../">← Back</a>
       <span class="logo" style="margin-left: 14px;">POD TETRIS <small>· pack the cluster</small></span>
+    </div>
+    <div class="settings">
+      <button class="btn" id="music-btn" title="Music on/off">♪</button>
+      <button class="btn" id="sfx-btn"   title="SFX on/off">⚲</button>
+      <button class="btn" id="settings-btn" title="Settings">⚙</button>
     </div>
     <div class="stats">
       <div class="stat"><label>Wave</label><div class="val"><span id="hud-wave">1</span>/10</div></div>
@@ -528,10 +870,24 @@ footer.bottom #controls-hint b { color: var(--gold-warm); }
     </aside>
   </main>
 
+  <div id="run-modifiers"></div>
+  <div id="settings-drawer">
+    <h4>Audio</h4>
+    <label>Music<input type="range" id="music-vol" min="0" max="100" value="50"/></label>
+    <label>Sound effects<input type="range" id="sfx-vol" min="0" max="100" value="80"/></label>
+    <label>Music enabled<div class="toggle on" id="music-toggle"></div></label>
+    <label>SFX enabled<div class="toggle on" id="sfx-toggle"></div></label>
+    <div class="now-playing">♪ <b id="now-playing-title">—</b></div>
+  </div>
   <footer class="bottom">
     <div id="message">Click a node to place the highlighted pod.</div>
-    <div id="controls-hint">
-      <b>Click</b> node · <b>1-5</b> quick place · <b>Space</b> hold · <b>R</b> restart
+    <div style="display:flex; align-items:center; gap:14px;">
+      <button id="autoscaler-btn" class="autoscaler-btn" title="Cluster Autoscaler: summon a fresh non-tainted node. Costs one bailout.">
+        ⚡ Autoscaler · <span id="bailouts-left">0</span> left
+      </button>
+      <div id="controls-hint">
+        <b>Click</b> · <b>1-6</b> · <b>Space</b> hold · <b>N</b> spawn node · <b>R</b> restart
+      </div>
     </div>
   </footer>
 </div>
@@ -545,22 +901,27 @@ footer.bottom #controls-hint b { color: var(--gold-warm); }
   <h1>POD TETRIS</h1>
   <h2>be the Kubernetes scheduler</h2>
   <p>
-    Pods arrive needing homes. Each pod wants CPU and memory. Nodes have limited capacity.
-    Your job: <b>pack them in tight</b>. Pack tightly enough, survive 10 waves, you win.
+    Pods arrive needing homes. Each wants CPU and memory. Nodes have limited capacity.
+    Your job: <b>pack them in tight</b>. Survive 10 waves to win — then enter Endless mode.
   </p>
   <p>
-    Wave by wave you'll meet the real constraints the Kubernetes scheduler wrestles with:
-    <b>anti-affinity</b>, <b>taints</b>, <b>stateful workloads</b>, <b>priority and preemption</b>.
-    Each one a single new wrinkle you can absorb at your own pace.
+    Wave by wave you'll meet the constraints the K8s scheduler wrestles with:
+    <b>anti-affinity</b>, <b>taints</b>, <b>stateful</b>, <b>priority + preemption</b>, <b>pod affinity</b>.
+    After every wave, pick one of three <b>boons</b> to shape your run.
   </p>
   <div class="keys">
-    <span><b>Click</b> node to place</span>
-    <span><b>1-5</b> quick place</span>
-    <span><b>Space</b> hold / swap</span>
-    <span><b>R</b> restart anytime</span>
+    <span><b>Click</b> place</span>
+    <span><b>1-6</b> quick</span>
+    <span><b>Space</b> hold</span>
+    <span><b>N</b> autoscaler</span>
+    <span><b>R</b> restart</span>
   </div>
   <button id="btn-start">Begin Wave 1</button>
   <div class="best" id="best-display"></div>
+  <div class="achievements-block">
+    <h4>Achievements</h4>
+    <div class="achievements-list" id="achievements-list"></div>
+  </div>
 </div>
 
 <!-- Wave-clear screen -->
@@ -572,10 +933,19 @@ footer.bottom #controls-hint b { color: var(--gold-warm); }
   <button id="btn-next-wave">Begin next wave →</button>
 </div>
 
+<!-- Boon selection between waves -->
+<div id="screen-boon" class="screen" style="display:none;">
+  <h1 style="font-size: 36px;">CHOOSE YOUR BOON</h1>
+  <h2>Three offers. Pick one to carry forward.</h2>
+  <div class="boon-grid" id="boon-grid"></div>
+  <button id="btn-boon-skip" class="ghost">Skip — take nothing</button>
+</div>
+
 <!-- Game over screen -->
 <div id="screen-game-over" class="screen" style="display:none;">
   <h1 id="over-title">GAME OVER</h1>
   <h2 id="over-sub"></h2>
+  <div id="over-final-board" class="final-board"></div>
   <div class="run-stats" id="over-stats"></div>
   <div class="lesson-card" id="over-lesson"></div>
   <button id="btn-retry">Try again</button>
@@ -588,7 +958,10 @@ footer.bottom #controls-hint b { color: var(--gold-warm); }
   <h2>You scheduled the cluster.</h2>
   <div class="run-stats" id="victory-stats"></div>
   <div class="lesson-card" id="victory-lesson"></div>
-  <button id="btn-victory-replay">Play again</button>
+  <div style="margin-top: 16px;">
+    <button id="btn-continue-endless">Continue → Endless mode</button>
+    <button class="ghost" id="btn-victory-replay">Play again from Wave 1</button>
+  </div>
   <a href="../" class="back-link">← back to arcade</a>
 </div>
 
@@ -673,34 +1046,43 @@ const POD_TYPES = {
    every pod; we generate them with constraints applied so each playthrough
    is a little different. */
 const WAVES = [
+  // Wave 1: gentle intro. Density ~0.42. 9 pods on 3 fat nodes (8/8 each = 48 total).
+  // No constraints. Bailouts: 0 (you don't need them; you should be able to packany order).
   {
     title: "Wave 1 · Basics",
-    intro: "<b>Wave 1.</b> Pods arrive. Each wants CPU and memory. Click a node to place. Pack tight for bonuses.",
-    nodes: () => [
+    intro: "<b>Wave 1.</b> Pods arrive with CPU + memory needs. Click a node to place. Pack tight for bonuses.",
+    density: 0.42,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
     ],
     podCount: 9,
     podTypes: ["web", "worker", "cache", "sidecar"],
-    addAffinity: false, addTaints: false, addStateful: false, addPriority: false,
+    bailouts: 0,
+    constraints: { affinity: 0, taints: 0, stateful: false, priority: 0, affinityPair: 0 },
   },
+  // Wave 2: anti-affinity. Density ~0.55.
   {
     title: "Wave 2 · Anti-affinity",
-    intro: "<b>Wave 2 · Anti-affinity.</b> Pods of the same <em>deployment</em> can't share a node — two replicas on one node would die together if it fails.",
-    nodes: () => [
+    intro: "<b>Wave 2 · Anti-affinity.</b> Same-deployment pods (purple-dashed) can't share a node — two replicas + one bad node = total outage.",
+    density: 0.55,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
     ],
     podCount: 11,
     podTypes: ["web", "worker", "cache", "sidecar"],
-    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "billing", count: 2 }],
+    bailouts: 0,
+    constraints: { affinity: [{ label: "auth", count: 3 }], taints: 0, stateful: false, priority: 0, affinityPair: 0 },
   },
+  // Wave 3: taints. Density ~0.62.
   {
     title: "Wave 3 · Taints",
-    intro: "<b>Wave 3 · Taints.</b> Some workloads need <em>special hardware</em>. GPU pods (gold) can only land on GPU-tainted nodes. Other pods can't.",
-    nodes: () => [
+    intro: "<b>Wave 3 · Taints.</b> GPU pods (gold) can ONLY land on GPU-tainted nodes. Other pods can't go there. Special hardware, intentional.",
+    density: 0.62,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
@@ -708,13 +1090,15 @@ const WAVES = [
     ],
     podCount: 13,
     podTypes: ["web", "worker", "cache", "sidecar"],
-    addAffinity: true, affinityGroups: [{ label: "auth", count: 2 }],
-    addTaints: true, taintedPods: 3, // 3 gpu pods
+    bailouts: 1,
+    constraints: { affinity: [{ label: "auth", count: 2 }], taints: 2, stateful: false, priority: 0, affinityPair: 0 },
   },
+  // Wave 4: stateful. Density ~0.68. First bailouts to use as safety net.
   {
     title: "Wave 4 · Stateful",
-    intro: "<b>Wave 4 · Stateful.</b> Database pods carry data on disk. Once placed, they <em>cannot be moved</em> (preemption-immune).",
-    nodes: () => [
+    intro: "<b>Wave 4 · Stateful.</b> Databases (lock icon) carry data on disk. Once placed, immovable. Plan their homes carefully.",
+    density: 0.68,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
@@ -722,14 +1106,15 @@ const WAVES = [
     ],
     podCount: 15,
     podTypes: ["web", "worker", "cache", "sidecar", "db"],
-    addAffinity: true, affinityGroups: [{ label: "auth", count: 2 }, { label: "api", count: 2 }],
-    addTaints: true, taintedPods: 3,
-    addStateful: true,
+    bailouts: 1,
+    constraints: { affinity: [{ label: "auth", count: 2 }, { label: "api", count: 2 }], taints: 2, stateful: true, priority: 0, affinityPair: 0 },
   },
+  // Wave 5: priority + preemption.  Density ~0.72.
   {
     title: "Wave 5 · Priority & Preemption",
-    intro: "<b>Wave 5 · Priority.</b> Critical (red-glowing) pods can <em>evict</em> lower-priority neighbors if no space exists.",
-    nodes: () => [
+    intro: "<b>Wave 5 · Priority.</b> Critical pods (red glow) can <em>evict</em> a low-priority neighbor if there's no clean spot.",
+    density: 0.72,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
@@ -737,15 +1122,15 @@ const WAVES = [
     ],
     podCount: 16,
     podTypes: ["web", "worker", "cache", "sidecar", "db"],
-    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 2 }],
-    addTaints: true, taintedPods: 3,
-    addStateful: true,
-    addPriority: true, priorityPods: 2,
+    bailouts: 1,
+    constraints: { affinity: [{ label: "auth", count: 3 }, { label: "api", count: 2 }], taints: 2, stateful: true, priority: 2, affinityPair: 0 },
   },
+  // Wave 6: introduce pod affinity (positive — co-locate for bonus). Density ~0.75.
   {
-    title: "Wave 6 · Mix",
-    intro: "<b>Wave 6.</b> All constraints active. The pace tightens.",
-    nodes: () => [
+    title: "Wave 6 · Pod Affinity",
+    intro: "<b>Wave 6 · Pod Affinity.</b> Some pods <em>want to be together</em> (a service + its cache). Co-locate them for a fat bonus.",
+    density: 0.75,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
@@ -754,15 +1139,15 @@ const WAVES = [
     ],
     podCount: 18,
     podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
-    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }],
-    addTaints: true, taintedPods: 3,
-    addStateful: true,
-    addPriority: true, priorityPods: 1,
+    bailouts: 2,
+    constraints: { affinity: [{ label: "auth", count: 3 }, { label: "api", count: 2 }], taints: 3, stateful: true, priority: 1, affinityPair: 2 },
   },
+  // Wave 7: density ramps. ~0.79.
   {
-    title: "Wave 7 · Bigger",
-    intro: "<b>Wave 7.</b> Bigger pods (batches) put pressure on capacity.",
-    nodes: () => [
+    title: "Wave 7 · Pressure",
+    intro: "<b>Wave 7.</b> Larger batches put pressure on capacity. Spend your bailouts wisely.",
+    density: 0.79,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
@@ -771,15 +1156,15 @@ const WAVES = [
     ],
     podCount: 20,
     podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
-    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 2 }],
-    addTaints: true, taintedPods: 3,
-    addStateful: true,
-    addPriority: true, priorityPods: 1,
+    bailouts: 2,
+    constraints: { affinity: [{ label: "auth", count: 3 }, { label: "api", count: 3 }], taints: 3, stateful: true, priority: 2, affinityPair: 2 },
   },
+  // Wave 8: ~0.82.
   {
     title: "Wave 8 · Tight",
-    intro: "<b>Wave 8.</b> Fewer nodes per pod. Margin for error is thin.",
-    nodes: () => [
+    intro: "<b>Wave 8.</b> Margin for error is thin. One sloppy placement and you've trapped yourself.",
+    density: 0.82,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
@@ -788,15 +1173,15 @@ const WAVES = [
     ],
     podCount: 22,
     podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
-    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 2 }],
-    addTaints: true, taintedPods: 4,
-    addStateful: true,
-    addPriority: true, priorityPods: 2,
+    bailouts: 2,
+    constraints: { affinity: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 2 }], taints: 4, stateful: true, priority: 2, affinityPair: 3 },
   },
+  // Wave 9: ~0.85.
   {
-    title: "Wave 9 · Pressure",
-    intro: "<b>Wave 9.</b> Heavy GPU load. Heavy state. One mistake and you're trapped.",
-    nodes: () => [
+    title: "Wave 9 · Heavy Load",
+    intro: "<b>Wave 9.</b> Two GPU nodes, heavy state, heavy affinity. The full picture.",
+    density: 0.85,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
@@ -806,15 +1191,15 @@ const WAVES = [
     ],
     podCount: 24,
     podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
-    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 3 }],
-    addTaints: true, taintedPods: 6,
-    addStateful: true,
-    addPriority: true, priorityPods: 2,
+    bailouts: 3,
+    constraints: { affinity: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 3 }], taints: 5, stateful: true, priority: 2, affinityPair: 3 },
   },
+  // Wave 10: ~0.88. The crucible.
   {
-    title: "Wave 10 · Final",
-    intro: "<b>Wave 10.</b> Everything. Survive 26 pods and you've earned it.",
-    nodes: () => [
+    title: "Wave 10 · The Crucible",
+    intro: "<b>Wave 10.</b> Everything at once. Survive 26 pods and the cluster bows to you.",
+    density: 0.88,
+    nodeTemplate: [
       { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
       { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
       { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
@@ -824,10 +1209,8 @@ const WAVES = [
     ],
     podCount: 26,
     podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
-    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 3 }, { label: "ads", count: 2 }],
-    addTaints: true, taintedPods: 6,
-    addStateful: true,
-    addPriority: true, priorityPods: 3,
+    bailouts: 3,
+    constraints: { affinity: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 3 }, { label: "ads", count: 2 }], taints: 6, stateful: true, priority: 3, affinityPair: 4 },
   },
 ];
 
@@ -838,7 +1221,7 @@ const WAVE_LESSONS = [
   "<strong>Lesson · taints and tolerations</strong><br>Taints are a node's way of saying 'I'm picky — don't put just any pod here.' Tolerations are a pod's way of saying 'I accept your terms.' GPUs are the classic case (don't waste expensive hardware on web pods) but the pattern also covers spot/preemptible nodes, dedicated tenancy, hardware quirks.",
   "<strong>Lesson · stateful workloads</strong><br>A stateful pod's data lives on a specific persistent volume attached to a specific node (or zone). You CAN'T just move it — the data wouldn't follow. This is why databases are scheduled with <code>StatefulSet</code> + PVC, not <code>Deployment</code>: the framework knows not to play musical chairs with your data.",
   "<strong>Lesson · priority and preemption</strong><br>When critical work can't fit, Kubernetes can evict less-critical work to make room. Set with <code>priorityClassName</code>. Use cautiously: preemption is disruption. The right answer is usually 'have more capacity,' but for the case where a true emergency arrives, preemption is the release valve.",
-  "<strong>Lesson · the whole picture</strong><br>You're now juggling everything the scheduler juggles every moment. The reason cluster autoscaler exists: when none of these constraints can be satisfied, you ADD a node. That's what production does at 3 AM when the GPU pods can't all fit — autoscaler conjures more.",
+  "<strong>Lesson · pod affinity (positive)</strong><br>The flip side of anti-affinity. Sometimes you WANT pods together — a service and its cache, for low-latency lookups. <code>podAffinity</code> says 'co-locate'. You felt the +60 bonus when a pair landed together. The same rule in production drops cross-node hops, which drops latency, which drops your p99 tail. <br><br>And: the Autoscaler bailout button you've been using? That's a real K8s feature too. When pods can't fit, the cluster autoscaler conjures a new node. Use sparingly — every node costs money.",
   "<strong>Lesson · resource requests vs limits</strong><br>The capacity numbers in this game are <em>requests</em> — the scheduler's allocation. In real K8s, there's a SECOND number: <em>limits</em>, the max a pod is allowed to actually use. The gap between request and limit is the overcommit budget — too little, you waste capacity; too much, you risk OOM-kills under spike load.",
   "<strong>Lesson · cluster topology</strong><br>What you packed into a 5-node cluster looks tight at this scale. Production clusters can have hundreds or thousands of nodes — and they ALSO span availability zones and regions. <code>topologySpreadConstraints</code> extend the anti-affinity idea across whole datacenters. Same trick, bigger scale.",
   "<strong>Lesson · cluster autoscaling</strong><br>When the scheduler can't fit a pending pod, the cluster autoscaler adds a node. When utilization drops below a threshold for long enough, it removes nodes. Combined with HPA (pod count) and VPA (pod size), you get a system that grows and shrinks against load without humans in the loop.",
@@ -849,24 +1232,119 @@ const WAVE_LESSONS = [
 const G = {
   wave: 1,
   nodes: [],
-  pendingQueue: [],   // upcoming pods (not yet shown in 3-pod queue)
-  visibleQueue: [],   // visible queue (first is current)
+  pendingQueue: [],
+  visibleQueue: [],
   hold: null,
   holdUsedThisPod: false,
   score: 0,
   combo: 0,
   comboTimer: 0,
+  bestCombo: 0,
   placedCount: 0,
   totalPlacedThisRun: 0,
-  state: "title",  // title | playing | waveClear | gameOver | victory
-  preemptMode: null,  // { pod, requiredCpu, requiredMem }
-  waveStats: { perfectNodes: 0, tightFits: 0, preempts: 0 },
+  state: "title",
+  preemptMode: null,
+  waveStats: { perfectNodes: 0, tightFits: 0, preempts: 0, paired: 0, bailouts: 0 },
+  bailoutsRemaining: 0,
+  bailoutsUsedThisWave: 0,
+  nodeBailoutSequence: 0,
+  lastGenerationSolvable: true,
+  waveTotalCpuCap: 0,
+  waveTotalMemCap: 0,
 };
 
 function bestScore() { try { return parseInt(localStorage.getItem("podTetris.best") || "0", 10); } catch { return 0; } }
 function setBestScore(s) { try { if (s > bestScore()) localStorage.setItem("podTetris.best", String(s)); } catch {} }
 
-/* ─── Pod generation ───────────────────────────────────────────────────── */
+/* ─── Solvability simulator ───────────────────────────────────────────────
+   We have to GUARANTEE that every wave we hand the player is solvable, or
+   we're being unfair. The general bin-packing problem is NP-complete, but
+   for the small puzzle sizes here (≤30 pods on ≤6 nodes) we can:
+     1. Run greedy best-fit-decreasing in several pod orders
+     2. If ANY order solves it, the puzzle is solvable
+     3. We then hand the player THAT order — guaranteed playable
+
+   This is the same trick puzzle-game designers have used since Sokoban:
+   work backward from the solved state, never give the player an impossible
+   board. */
+
+function sumCpuOf(pods) { return pods.reduce((s, p) => s + p.cpu, 0); }
+function sumMemOf(pods) { return pods.reduce((s, p) => s + p.mem, 0); }
+
+function trySolve(orderedPods, nodesTemplate) {
+  // Simulate placement following the game's exact rules.
+  const nodes = nodesTemplate.map(n => ({
+    id: n.id, name: n.name, cpu: n.cpu, mem: n.mem,
+    taints: [...n.taints], pods: [],
+  }));
+
+  for (const pod of orderedPods) {
+    const valid = nodes.filter(n => validatePlacement(pod, n).ok);
+    if (valid.length === 0) {
+      // Try preemption only for high-priority
+      if (pod.priority === "high") {
+        const opts = preemptionOptionsFor(pod, nodes);
+        if (opts.length === 0) return false;
+        // Pick the option that evicts the smallest pod (least disruptive)
+        const best = opts.reduce((b, o) => {
+          const evictSize = o.victim.cpu + o.victim.mem;
+          if (!b || evictSize < b.size) return { ...o, size: evictSize };
+          return b;
+        }, null);
+        best.node.pods = best.node.pods.filter(p => p !== best.victim);
+        best.node.pods.push(pod);
+        continue;
+      }
+      return false;
+    }
+    // Best-fit: pick node minimizing wasted space after placement
+    let best = null, bestScore = -Infinity;
+    for (const n of valid) {
+      const newCpuLeft = n.cpu - (sumCpuOf(n.pods) + pod.cpu);
+      const newMemLeft = n.mem - (sumMemOf(n.pods) + pod.mem);
+      // Penalize remaining slack — less leftover is better.
+      // Also slight preference for matching pod's profile (CPU-heavy → less-CPU-used node)
+      const score = -(newCpuLeft + newMemLeft);
+      if (score > bestScore) { bestScore = score; best = n; }
+    }
+    best.pods.push(pod);
+  }
+  return true;
+}
+
+// Helper for the solver's preemption logic (mirrors the game's, simplified)
+function preemptionOptionsFor(pod, nodes) {
+  const out = [];
+  for (const node of nodes) {
+    // The empty-version of node must accept this pod (taint/affinity OK)
+    const empty = { ...node, pods: [] };
+    if (!validatePlacement(pod, empty).ok) continue;
+    // Pick an evictable pod whose removal makes room
+    const evictables = node.pods.filter(p => !p.stateful && p.priority !== "high");
+    for (const victim of evictables) {
+      const remaining = node.pods.filter(p => p !== victim);
+      const cpuLeft = node.cpu - sumCpuOf(remaining);
+      const memLeft = node.mem - sumMemOf(remaining);
+      if (cpuLeft >= pod.cpu && memLeft >= pod.mem) {
+        // Affinity check after eviction
+        if (pod.affinityGroup && remaining.some(p => p.affinityGroup === pod.affinityGroup)) continue;
+        out.push({ node, victim });
+      }
+    }
+  }
+  return out;
+}
+
+/* ─── Wave generation ───────────────────────────────────────────────────────
+   Two pass approach:
+     1. Generate a pod multiset that respects:
+        - Total resource budget (target = wave.density × total node capacity)
+        - GPU pod resources fit within total GPU node capacity
+        - Affinity group sizes ≤ available non-tainted nodes
+     2. Find an ORDER that's greedy-solvable. Try several orderings.
+   If we can't find a solvable order after many attempts, we lower the density
+   slightly and try again — never trapping the player. */
+
 let podIdCounter = 1;
 function makePod(type, opts = {}) {
   const def = POD_TYPES[type];
@@ -881,56 +1359,204 @@ function makePod(type, opts = {}) {
     taint: opts.taint || null,
     stateful: opts.stateful || (def.statefulChance && Math.random() < def.statefulChance) || false,
     priority: opts.priority || "normal",
+    pairWith: opts.pairWith || null,
   };
 }
 
-/* Generate a wave's pod sequence based on the wave's rules. */
-function generateWavePods(wave) {
+function makeSmallestPod(type, opts = {}) {
+  // Like makePod but always picks the SMALLEST variant in cpu/mem ranges.
+  // Used for structural (constraint) pods so we never blow the budget.
+  const def = POD_TYPES[type];
+  const cpu = Math.min(...def.cpu);
+  const mem = Math.min(...def.mem);
+  return {
+    id: "p" + (podIdCounter++),
+    type, name: def.display + "-" + podIdCounter, color: def.hex,
+    cpu, mem,
+    affinityGroup: opts.affinityGroup || null,
+    taint: opts.taint || null,
+    stateful: opts.stateful || false,
+    priority: opts.priority || "normal",
+    pairWith: opts.pairWith || null,
+  };
+}
+
+function generatePodSet(wave, densityMul = 1.0) {
+  const allNodes = wave.nodeTemplate;
+  const gpuNodes = allNodes.filter(n => n.taints.includes("gpu"));
+  const generalNodes = allNodes.filter(n => n.taints.length === 0);
+  const gpuCpuCap = gpuNodes.reduce((s, n) => s + n.cpu, 0);
+  const gpuMemCap = gpuNodes.reduce((s, n) => s + n.mem, 0);
+  const totalCpuCap = allNodes.reduce((s, n) => s + n.cpu, 0);
+  const totalMemCap = allNodes.reduce((s, n) => s + n.mem, 0);
+  const generalCpuCap = generalNodes.reduce((s, n) => s + n.cpu, 0);
+  const generalMemCap = generalNodes.reduce((s, n) => s + n.mem, 0);
+
+  const targetDensity = wave.density * densityMul;
+  const targetCpu = totalCpuCap * targetDensity;
+  const targetMem = totalMemCap * targetDensity;
+  // Hard ceiling so the puzzle is always feasible (90% of TOTAL, regardless of density)
+  const hardCpuMax = totalCpuCap * 0.92;
+  const hardMemMax = totalMemCap * 0.92;
+  const generalCpuMax = generalCpuCap * 0.92;
+  const generalMemMax = generalMemCap * 0.92;
+
   const pods = [];
-  // First, mandatory taints
-  if (wave.addTaints && wave.taintedPods) {
-    for (let i = 0; i < wave.taintedPods; i++) {
-      const type = choice(wave.podTypes.filter(t => t !== "sidecar"));
-      pods.push(makePod(type, { taint: "gpu" }));
+  let cpuUsed = 0, memUsed = 0;
+  let generalCpuUsed = 0, generalMemUsed = 0;  // tracks non-tainted pod demand
+  let gpuCpuUsed = 0, gpuMemUsed = 0;
+
+  function tryAdd(pod, isGpu = false) {
+    // Hard caps first — never let the puzzle become infeasible
+    if (cpuUsed + pod.cpu > hardCpuMax) return false;
+    if (memUsed + pod.mem > hardMemMax) return false;
+    if (isGpu) {
+      if (gpuCpuUsed + pod.cpu > gpuCpuCap * 0.95) return false;
+      if (gpuMemUsed + pod.mem > gpuMemCap * 0.95) return false;
+      gpuCpuUsed += pod.cpu; gpuMemUsed += pod.mem;
+    } else {
+      if (generalCpuUsed + pod.cpu > generalCpuMax) return false;
+      if (generalMemUsed + pod.mem > generalMemMax) return false;
+      generalCpuUsed += pod.cpu; generalMemUsed += pod.mem;
+    }
+    cpuUsed += pod.cpu; memUsed += pod.mem;
+    pods.push(pod);
+    return true;
+  }
+
+  // Order matters: we add the MOST RESTRICTIVE pods first so the budget
+  // never runs out before the teaching-mechanic pods are placed. The fillers
+  // at the end consume the slack.
+
+  // 1. Stateful (db) pods — smallest db, always 2 of them when active
+  if (wave.constraints.stateful) {
+    for (let i = 0; i < 2; i++) tryAdd(makeSmallestPod("db", { stateful: true }));
+  }
+
+  // 2. Priority pods — guaranteed to appear when the wave has them, so the
+  //    preemption mechanic always gets exercised
+  const prioCount = wave.constraints.priority || 0;
+  for (let i = 0; i < prioCount; i++) {
+    const friendlyTypes = wave.podTypes.filter(t => t !== "sidecar");
+    tryAdd(makeSmallestPod(choice(friendlyTypes), { priority: "high" }));
+  }
+
+  // 3. GPU pods — smallest, capped to GPU node capacity
+  const gpuCount = wave.constraints.taints || 0;
+  if (gpuCount > 0 && gpuNodes.length > 0) {
+    const gpuTypes = wave.podTypes.filter(t => t !== "sidecar");
+    let added = 0;
+    for (let attempt = 0; attempt < gpuCount * 4 && added < gpuCount; attempt++) {
+      const t = choice(gpuTypes);
+      if (tryAdd(makeSmallestPod(t, { taint: "gpu" }), true)) added++;
     }
   }
-  // Affinity groups
-  if (wave.addAffinity && wave.affinityGroups) {
-    for (const g of wave.affinityGroups) {
-      for (let i = 0; i < g.count; i++) {
-        const type = choice(wave.podTypes.filter(t => t !== "sidecar" && t !== "db" && t !== "batch"));
-        pods.push(makePod(type, { affinityGroup: g.label }));
-      }
+
+  // 4. Affinity groups — clamp count to non-tainted node count, always smallest
+  for (const group of wave.constraints.affinity || []) {
+    const safeCount = Math.min(group.count, generalNodes.length);
+    const friendlyTypes = wave.podTypes.filter(t => t !== "sidecar" && t !== "db" && t !== "batch");
+    for (let i = 0; i < safeCount; i++) {
+      tryAdd(makeSmallestPod(choice(friendlyTypes), { affinityGroup: group.label }));
     }
   }
-  // Priority pods
-  if (wave.addPriority && wave.priorityPods) {
-    for (let i = 0; i < wave.priorityPods; i++) {
-      const type = choice(wave.podTypes.filter(t => t !== "sidecar"));
-      pods.push(makePod(type, { priority: "high" }));
-    }
+
+  // 5. Pod-affinity pairs (positive affinity) — small web + small cache
+  const pairCount = wave.constraints.affinityPair || 0;
+  for (let i = 0; i < pairCount; i++) {
+    const pairId = "pair-" + i;
+    const a = makeSmallestPod("web", { pairWith: pairId });
+    const b = makeSmallestPod("cache", { pairWith: pairId });
+    tryAdd(a); tryAdd(b);
   }
-  // Stateful (db) pods that don't already exist
-  if (wave.addStateful) {
-    const dbCount = pods.filter(p => p.type === "db").length;
-    const needed = Math.max(0, 2 - dbCount);
-    for (let i = 0; i < needed; i++) pods.push(makePod("db", { stateful: true }));
-  }
-  // Fill remainder with weighted types
+
+  // 6. Fill remainder with random-sized pods, respecting the soft target density
+  // and the hard capacity ceiling. Stops naturally when budget runs out.
   const weighted = [];
   for (const t of wave.podTypes) {
+    if (t === "db") continue;
     const w = POD_TYPES[t].weight || 1;
     for (let i = 0; i < w; i++) weighted.push(t);
   }
-  while (pods.length < wave.podCount) {
+  let fillAttempts = 0;
+  while (pods.length < wave.podCount && fillAttempts++ < 400) {
     const t = choice(weighted);
-    pods.push(makePod(t));
+    const candidate = makePod(t);
+    // Don't exceed soft target density (with 5% slack)
+    if (cpuUsed + candidate.cpu > targetCpu * 1.05 && pods.length >= wave.podCount * 0.7) break;
+    if (memUsed + candidate.mem > targetMem * 1.05 && pods.length >= wave.podCount * 0.7) break;
+    tryAdd(candidate);
   }
-  // Shuffle but ensure first pod is friendly (no constraints) on early waves
-  const head = pods.find(p => !p.taint && !p.affinityGroup && p.priority === "normal" && !p.stateful);
-  let rest = pods.filter(p => p !== head);
-  rest = shuffle(rest);
-  return head ? [head, ...rest] : shuffle(pods);
+
+  // 7. If still short of podCount, try sidecars (smallest possible)
+  let sidecarAttempts = 0;
+  while (pods.length < wave.podCount && sidecarAttempts++ < 30) {
+    if (!tryAdd(makePod("sidecar"))) break;
+  }
+
+  return pods;
+}
+
+function generateSolvableWave(wave) {
+  // Apply pod-shrink boon if active: temporarily reduce pod cpu/mem
+  // (Pod types are objects; we don't mutate them. We post-process the pods.)
+  // Try several densities (starting from full, easing if needed)
+  for (const densityMul of [1.0, 0.95, 0.90, 0.85, 0.80]) {
+    // Try several generations at this density
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const pods = generatePodSet(wave, densityMul);
+      // Try several orderings — return the first solvable one
+      const candidates = [
+        pods,
+        [...pods].sort((a, b) => (b.cpu + b.mem) - (a.cpu + a.mem)),     // big first
+        [...pods].sort((a, b) => Math.max(b.cpu, b.mem) - Math.max(a.cpu, a.mem)),
+        [...pods].sort((a, b) => {
+          // priority/stateful early — those are the constrained ones
+          const aScore = (a.priority === "high" ? 0 : 1) + (a.stateful ? 0 : 1) + (a.taint ? 0 : 0.5);
+          const bScore = (b.priority === "high" ? 0 : 1) + (b.stateful ? 0 : 1) + (b.taint ? 0 : 0.5);
+          return aScore - bScore;
+        }),
+        shuffle(pods),
+      ];
+      for (const order of candidates) {
+        if (trySolve(order, wave.nodeTemplate)) {
+          // Reorder so the first pod is gentle (no constraints) — gives the player a moment
+          // to read the constraint banner before having to act on it.
+          const easyHead = order.findIndex(p => !p.taint && !p.affinityGroup && p.priority === "normal" && !p.stateful && !p.pairWith);
+          if (easyHead > 0) {
+            const head = order.splice(easyHead, 1)[0];
+            order.unshift(head);
+            // Verify still solvable after the reshuffle
+            if (trySolve(order, wave.nodeTemplate)) return { pods: order, density: densityMul, generated: true };
+            // If not, revert the swap
+            const idx = order.indexOf(head);
+            order.splice(idx, 1);
+            order.splice(easyHead, 0, head);
+          }
+          // Apply pod-shrink boon if active (legacy "Compact Pods")
+          if (typeof G !== "undefined" && G.modifiers && G.modifiers.podShrinkNext < 1) {
+            for (const p of order) {
+              p.cpu = Math.max(1, Math.round(p.cpu * G.modifiers.podShrinkNext));
+              p.mem = Math.max(1, Math.round(p.mem * G.modifiers.podShrinkNext));
+            }
+          }
+          // Apply "Lean Pods" boon: 1 in 3 random pods becomes smaller
+          if (typeof G !== "undefined" && G.modifiers && G.modifiers.leanPodsNext) {
+            for (const p of order) {
+              if (Math.random() < 0.33) {
+                if (p.cpu > 1 && Math.random() < 0.5) p.cpu = Math.max(1, p.cpu - 1);
+                else if (p.mem > 1) p.mem = Math.max(1, p.mem - 1);
+              }
+            }
+          }
+          return { pods: order, density: densityMul, generated: true };
+        }
+      }
+    }
+  }
+  // Could not generate — return last attempt with a flag
+  console.warn("Pod Tetris: could not generate a solvable wave after many attempts; the generator was unkind.");
+  return { pods: generatePodSet(wave, 0.7), density: 0.7, generated: false };
 }
 
 /* ─── Placement validation ─────────────────────────────────────────────── */
@@ -1040,6 +1666,7 @@ function podCardEl(pod, opts = {}) {
         ${pod.taint ? `<span class="badge gpu">${pod.taint}</span>` : ""}
         ${pod.stateful ? `<span class="badge stateful">stateful</span>` : ""}
         ${pod.priority === "high" ? `<span class="badge priority">priority</span>` : ""}
+        ${pod.pairWith ? `<span class="badge" style="background:rgba(184,159,115,0.25); color:#e0c790;">pair</span>` : ""}
       </div>
     </div>
     <div class="pod-shape">${podHexSvg(pod, 56)}</div>
@@ -1127,20 +1754,31 @@ function nodeEl(node, idx) {
       const mini = document.createElement("div");
       mini.className = "pod-mini" + (p.stateful ? " stateful" : "") + (p._justEntered ? " entering" : "");
       mini.dataset.podId = p.id;
+      mini.dataset.podType = p.type;
+      if (p.pairWith) mini.dataset.pairWith = p.pairWith;
+      if (p.priority === "high") mini.classList.add("priority");
       // Width/height proportional to cpu/mem
-      const w = 16 + p.cpu * 7;
-      const h = 16 + p.mem * 5;
+      const w = 22 + p.cpu * 9;
+      const h = 22 + p.mem * 7;
       mini.style.width = w + "px";
       mini.style.height = h + "px";
       mini.innerHTML = podHexSvg(p, Math.min(w, h));
-      if (p.cpu * p.mem >= 6) {
-        const label = document.createElement("div");
-        label.className = "mini-label";
-        label.textContent = p.type.charAt(0).toUpperCase();
-        mini.appendChild(label);
-      }
+      // Always show resource numbers — even on small pods
+      const label = document.createElement("div");
+      label.className = "mini-label";
+      label.innerHTML = `<span class="mini-cpu">${p.cpu}</span><span class="mini-sep">/</span><span class="mini-mem">${p.mem}</span>`;
+      mini.appendChild(label);
+      // Hover tooltip with name + flags
+      const tip = document.createElement("div");
+      tip.className = "pod-tooltip";
+      tip.innerHTML = `<b>${p.name}</b><br>${p.cpu} CPU · ${p.mem} mem` +
+        (p.affinityGroup ? `<br>group: ${p.affinityGroup}` : "") +
+        (p.taint ? `<br>needs: ${p.taint}` : "") +
+        (p.stateful ? `<br>🔒 stateful` : "") +
+        (p.priority === "high" ? `<br>★ priority` : "") +
+        (p.pairWith ? `<br>↔ pair: ${p.pairWith}` : "");
+      mini.appendChild(tip);
       podsEl.appendChild(mini);
-      // Clear the "just entered" flag after animation
       if (p._justEntered) setTimeout(() => { delete p._justEntered; }, 500);
     }
   }
@@ -1210,11 +1848,19 @@ function floatScore(x, y, text, cls = "") {
 
 function updateHUD() {
   $("#hud-wave").textContent = String(G.wave);
-  $("#hud-score").textContent = G.score.toLocaleString();
+  ScoreAnimator.set(G.score, $("#hud-score"));
   const cEl = $("#hud-combo");
   cEl.textContent = "×" + (G.combo + 1);
   cEl.classList.toggle("zero", G.combo === 0);
+  // Apply chain-N class for visual escalation
+  cEl.classList.remove("chain-2", "chain-3", "chain-5", "chain-7");
+  if (G.combo >= 7) cEl.classList.add("chain-7");
+  else if (G.combo >= 5) cEl.classList.add("chain-5");
+  else if (G.combo >= 3) cEl.classList.add("chain-3");
+  else if (G.combo >= 2) cEl.classList.add("chain-2");
   $("#hud-placed").textContent = String(G.placedCount);
+  updateBailoutHUD();
+  updateMusicForState();
 }
 
 /* ─── Placement logic ───────────────────────────────────────────────────── */
@@ -1259,37 +1905,76 @@ function doPlace(pod, node) {
   const cpuLeft = node.cpu - usedCpu, memLeft = node.mem - usedMem;
   const isPerfect = usedCpu === node.cpu && usedMem === node.mem;
   const isTight = !isPerfect && (cpuLeft <= 1 && memLeft <= 1);
+
+  // Pod-affinity bonus — co-located with its pair = +60
+  if (pod.pairWith) {
+    const buddy = node.pods.find(p => p !== pod && p.pairWith === pod.pairWith);
+    if (buddy) {
+      bonus += 60;
+      toast = toast || "♛ Pair bonus +60";
+      G.waveStats.paired++;
+      // Persistent visual: both pods get a "paired-here" dashed outline
+      // (stays for the rest of the wave, not just a 1.2s flash)
+      setTimeout(() => {
+        document.querySelectorAll(`.pod-mini`).forEach(m => {
+          if (m.dataset.podId === pod.id || m.dataset.podId === buddy.id) {
+            m.classList.add("paired-here");
+          }
+        });
+      }, 50);
+    }
+  }
+
   if (isPerfect) {
-    bonus = 200;
+    bonus += 200;
     toast = "PERFECT FIT";
     G.combo++;
     G.waveStats.perfectNodes++;
     sfx("perfect");
   } else if (isTight) {
-    bonus = 80;
-    toast = "Tight pack +80";
+    const tightAmt = 80 * (G.modifiers && G.modifiers.tightMult ? G.modifiers.tightMult : 1);
+    bonus += tightAmt;
+    toast = toast || ("Tight pack +" + tightAmt);
     G.combo++;
     G.waveStats.tightFits++;
     sfx("tight");
   } else if (cpuLeft <= 2 && memLeft <= 2 && (usedCpu + usedMem) > 8) {
-    bonus = 25;
-    toast = "+25";
+    const slackAmt = (G.modifiers && G.modifiers.slackBonus) ? 50 : 25;
+    bonus += slackAmt;
+    toast = toast || ("+" + slackAmt);
     sfx("place");
   } else {
     sfx("place");
   }
-  const total = (basePoints + bonus) * (1 + G.combo * 0.1);
+  if (G.combo > G.bestCombo) G.bestCombo = G.combo;
+  // Apply boon multipliers
+  let bonusMult = 1;
+  if (isPerfect && G.modifiers && G.modifiers.perfectMult > 1) bonusMult *= G.modifiers.perfectMult;
+  if (pod.pairWith && node.pods.find(p => p !== pod && p.pairWith === pod.pairWith) && G.modifiers && G.modifiers.pairMult > 1) bonusMult *= G.modifiers.pairMult;
+  let total = (basePoints + bonus * bonusMult) * (1 + G.combo * 0.1);
+  if (G.modifiers && G.modifiers.scoreMultNext > 1) total *= G.modifiers.scoreMultNext;
   G.score += Math.round(total);
   G.placedCount++;
   G.totalPlacedThisRun++;
-  if (G.combo === 0 && !isPerfect && !isTight) {
-    // No combo, no toast text
-  } else if (toast) {
+  if (toast) {
     const el = document.querySelector(`.node[data-node-id="${node.id}"]`);
     const rect = el.getBoundingClientRect();
     floatScore(rect.left + rect.width/2, rect.top + 40, toast, isPerfect ? "perfect" : "combo");
   }
-  if (!isPerfect && !isTight) G.combo = 0;
+  if (!isPerfect && !isTight) {
+    const graceMax = (G.modifiers && G.modifiers.comboGrace) ? G.modifiers.comboGrace : 0;
+    if (graceMax > 0 && G.comboGraceUsedThisWave < graceMax) {
+      G.comboGraceUsedThisWave++;
+    } else {
+      G.combo = 0;
+    }
+  }
+  // Animate combo escalation
+  if (G.combo > 0) {
+    const cEl = document.querySelector("header.top .stat.combo");
+    cEl.classList.add("escalating");
+    setTimeout(() => cEl.classList.remove("escalating"), 400);
+  }
 
   // Friendly message about what just happened
   let msg = `Placed ${pod.name} on ${node.name}. `;
@@ -1305,7 +1990,11 @@ function doPlace(pod, node) {
   // Brief flash for full node
   if (isPerfect || (usedCpu === node.cpu && usedMem === node.mem)) {
     const el = document.querySelector(`.node[data-node-id="${node.id}"]`);
-    if (el) { el.classList.add("perfect"); setTimeout(() => el.classList.remove("perfect"), 1000); sfx("node-full"); }
+    if (el) {
+      el.classList.add("perfect", "perfect-wipe");
+      setTimeout(() => el.classList.remove("perfect", "perfect-wipe"), 1300);
+      sfx("node-full");
+    }
   }
 
   // Check for wave clear or game over
@@ -1321,31 +2010,58 @@ function checkLoseCondition() {
   const pod = currentPod();
   if (!pod) return;
   const valid = validNodesFor(pod);
-  // If pod is priority, check preemption options
-  if (valid.length === 0) {
-    if (pod.priority === "high") {
-      const opts = preemptionOptions(pod);
-      if (opts.length > 0) {
-        enterPreemptMode(pod, opts);
-        return;
-      }
-    }
-    // Check if hold can save us
-    if (G.hold && validNodesFor(G.hold).length > 0 && !G.holdUsedThisPod) {
-      $("#message").innerHTML = `<span style="color:var(--orange);">⚠ No valid placement for ${pod.name}.</span> Press <b>Space</b> to swap with hold.`;
-      return;
-    }
-    gameOver(pod);
+  // Clear pulse from previous turn
+  $("#autoscaler-btn").classList.remove("urgent");
+  if (valid.length > 0) return;
+  if (pod.priority === "high") {
+    const opts = preemptionOptions(pod);
+    if (opts.length > 0) { enterPreemptMode(pod, opts); return; }
   }
+  // Hold rescue available?
+  const holdHelpful = G.hold && validNodesFor(G.hold).length > 0 && !G.holdUsedThisPod;
+  // Autoscaler available?
+  const autoscalerAvailable = G.bailoutsRemaining > 0;
+  if (holdHelpful) {
+    $("#message").innerHTML = `<span style="color:var(--orange);">⚠ No spot for ${pod.name}.</span> Press <b>Space</b> to swap with hold` + (autoscalerAvailable ? `, or click <b>Autoscaler</b> to spawn a node.` : ".");
+    if (autoscalerAvailable) $("#autoscaler-btn").classList.add("urgent");
+    return;
+  }
+  if (autoscalerAvailable) {
+    $("#message").innerHTML = `<span style="color:var(--orange);">⚠ No spot for ${pod.name}.</span> Click the pulsing <b>Autoscaler</b> button to spawn a new node.`;
+    $("#autoscaler-btn").classList.add("urgent");
+    return;
+  }
+  gameOver(pod);
 }
 
 /* ─── Preemption flow ───────────────────────────────────────────────────── */
+function showPreemptTutorial() {
+  const tut = document.createElement("div");
+  tut.className = "preempt-tutorial";
+  tut.innerHTML = `
+    <div class="card">
+      <h3>★ PREEMPTION</h3>
+      <p>The pod arriving is <strong>high priority</strong> (red glow). It must run — but no node has space.</p>
+      <p>In real Kubernetes, the scheduler can <strong>evict</strong> a less-important pod to make room. You can too: click any glowing pod inside a node, and it gets removed. The priority pod takes its place.</p>
+      <p>You'll lose the evicted pod's contribution. Choose the one that hurts least.</p>
+      <button id="preempt-tut-ok">Got it · let me try</button>
+    </div>
+  `;
+  document.body.appendChild(tut);
+  tut.querySelector("#preempt-tut-ok").addEventListener("click", () => tut.remove());
+  try { localStorage.setItem("podTetris.sawPreemptTutorial", "1"); } catch {}
+}
+
 function enterPreemptMode(pod, options) {
   G.preemptMode = { pod, options };
+  // First time? Pause and explain.
+  let saw = false;
+  try { saw = localStorage.getItem("podTetris.sawPreemptTutorial") === "1"; } catch {}
+  if (!saw) showPreemptTutorial();
   const banner = $("#preempt-banner");
   banner.classList.remove("hidden");
   banner.innerHTML = `
-    <b>HIGH PRIORITY: ${pod.name}</b> can't fit. Click a low-priority pod to <b>evict</b> it and free space.
+    <b>HIGH PRIORITY: ${pod.name}</b> can't fit. Click a glowing pod inside a node to <b>evict</b> it.
     <button id="cancel-preempt">Cancel (lose)</button>
   `;
   $("#cancel-preempt").addEventListener("click", () => gameOver(pod));
@@ -1379,6 +2095,7 @@ function doEvict(node, victim, attacker) {
   // Remove victim from node
   node.pods = node.pods.filter(p => p.id !== victim.id);
   G.waveStats.preempts++;
+  G.runHadAnyPreempt = true;
   sfx("preempt");
   $("#message").innerHTML = `<span style="color:var(--red);">⚠ Evicted ${victim.name}.</span> Now placing ${attacker.name}.`;
   // Clear preempt mode visuals
@@ -1409,6 +2126,11 @@ function swapHold() {
   if (G.preemptMode) return;
   const pod = currentPod();
   if (!pod) return;
+  if (G.modifiers && G.modifiers.disableHoldNext) {
+    $("#message").innerHTML = "<span style='color:var(--orange);'>Hold disabled this wave</span> (Lean & Mean active).";
+    sfx("invalid");
+    return;
+  }
   if (G.holdUsedThisPod) {
     $("#message").innerHTML = "<span style='color:var(--orange);'>Hold already used for this pod.</span> Place this one first.";
     sfx("invalid");
@@ -1435,7 +2157,8 @@ function swapHold() {
 }
 
 function refillVisibleQueue() {
-  while (G.visibleQueue.length < 3 && G.pendingQueue.length > 0) {
+  const target = (G.modifiers && G.modifiers.lookaheadNext) ? G.modifiers.lookaheadNext : 3;
+  while (G.visibleQueue.length < target && G.pendingQueue.length > 0) {
     G.visibleQueue.push(G.pendingQueue.shift());
   }
 }
@@ -1443,14 +2166,48 @@ function refillVisibleQueue() {
 /* ─── Wave lifecycle ───────────────────────────────────────────────────── */
 function startWave(n) {
   G.wave = n;
-  const def = WAVES[n - 1];
-  G.nodes = def.nodes();
-  G.pendingQueue = generateWavePods(def);
+  const def = (n <= WAVES.length) ? WAVES[n - 1] : buildEndlessWave(n - WAVES.length);
+  // Start from a fresh nodeTemplate (deep copy so the player's placements don't leak)
+  G.nodes = def.nodeTemplate.map(t => ({ id: t.id, name: t.name, cpu: t.cpu, mem: t.mem, taints: [...t.taints], pods: [] }));
+  const gen = generateSolvableWave(def);
+  G.pendingQueue = gen.pods;
+  G.lastGenerationSolvable = gen.generated;
+  G.bailoutsRemaining = (def.bailouts || 0) + (G.modifiers ? G.modifiers.extraBailoutsNext || 0 : 0);
+  // Add permanent defrag charges + any next-wave defrag charges
+  if (G.modifiers) {
+    const perma = G.modifiers.permaDefrag || 0;
+    G.modifiers.defragChargesNext = (G.modifiers.defragChargesNext || 0) + perma;
+  }
+  G.bailoutsUsedThisWave = 0;
+  G.nodeBailoutSequence = 0;
+  // Apply mini-node boon (4/4 capacity)
+  if (G.modifiers && G.modifiers.extraMiniNodeNext) {
+    G.nodes.push({ id: 200 + G.nodes.length, name: "mini-node", cpu: 2, mem: 2, taints: [], pods: [] });
+    G.modifiers.extraMiniNodeNext = false;
+  }
+  // Apply node-shrink (Reckless Surge trade-off): CPU axis only, only on
+  // non-tainted nodes (GPU nodes keep full capacity because GPU pods need it).
+  // With +3 bailouts AND +1.2x score, this is a real trade.
+  if (G.modifiers && G.modifiers.shrinkNodesNext) {
+    for (const n of G.nodes) {
+      if (n.taints.length === 0 && n.cpu > 7) n.cpu = 7;
+    }
+    G.modifiers.shrinkNodesNext = false;
+  }
+  // Apply zero-bailouts (Lean & Mean)
+  if (G.modifiers && G.modifiers.zeroBailoutsNext) {
+    G.bailoutsRemaining = 0;
+    G.modifiers.zeroBailoutsNext = false;
+  }
+  G.waveTotalCpuCap = G.nodes.reduce((s, n) => s + n.cpu, 0);
+  G.waveTotalMemCap = G.nodes.reduce((s, n) => s + n.mem, 0);
   G.visibleQueue = [];
   refillVisibleQueue();
   G.holdUsedThisPod = false;
   G.placedCount = 0;
-  G.waveStats = { perfectNodes: 0, tightFits: 0, preempts: 0 };
+  G.waveStats = { perfectNodes: 0, tightFits: 0, preempts: 0, paired: 0, bailouts: 0 };
+  G.comboGraceUsedThisWave = 0;
+  renderRunModifiers();
   G.state = "playing";
   // Show tutorial banner
   const tut = $("#tutorial");
@@ -1462,25 +2219,90 @@ function startWave(n) {
   renderQueue();
   renderHold();
   updateHUD();
+  updateBailoutHUD();
+  showDifficultyMeter(def);
+  // Endless mode banner
+  const existing = document.querySelector(".endless-banner");
+  if (existing) existing.remove();
+  if (G.endlessActive) {
+    const b = document.createElement("div");
+    b.className = "endless-banner";
+    b.textContent = "ENDLESS · WAVE " + G.wave;
+    $("#shell").appendChild(b);
+  }
   sfx("wave-start");
+}
+
+/* Inject a small difficulty meter into the tutorial banner so the player
+   immediately senses how hard the wave will be. Density → pip count + color. */
+function showDifficultyMeter(def) {
+  const tut = $("#tutorial");
+  const density = def.density;
+  let label, cls;
+  if (density < 0.55)      { label = "EASY";   cls = "easy"; }
+  else if (density < 0.7)  { label = "MEDIUM"; cls = "med"; }
+  else if (density < 0.82) { label = "HARD";   cls = "hard"; }
+  else                     { label = "BRUTAL"; cls = "brutal"; }
+  const pips = Math.ceil(density * 7);
+  const pipsHtml = Array.from({ length: 7 }, (_, i) =>
+    `<span class="pip ${i < pips ? "on-" + cls : ""}"></span>`
+  ).join("");
+  // Append the meter to the existing intro text
+  tut.innerHTML += `<div style="margin-top:8px; font-size:12px; color:var(--muted);">
+    Difficulty: <span style="color:var(--honey); font-weight:600;">${label}</span>
+    <span class="diff-meter">${pipsHtml}</span>
+    · ${def.podCount} pods · ${def.nodeTemplate.length} nodes
+    · ${def.bailouts > 0 ? def.bailouts + " autoscaler bailout" + (def.bailouts > 1 ? "s" : "") : "no bailouts"}
+  </div>`;
 }
 
 function waveClear() {
   G.state = "waveClear";
   sfx("wave-clear");
   const def = WAVES[G.wave - 1];
+  // Detect "Perfect Wave" — every node hit capacity on at least one axis
+  // and at least HALF the nodes are perfectly packed.
+  const totalNodes = G.nodes.length;
+  const perfectNodes = G.nodes.filter(n => nodeUsedCpu(n) === n.cpu && nodeUsedMem(n) === n.mem).length;
+  const isPerfectWave = perfectNodes >= Math.ceil(totalNodes / 2) && G.waveStats.preempts === 0 && G.waveStats.bailouts === 0;
+  const usedAutoscaler = G.waveStats.bailouts > 0;
+
+  if (isPerfectWave) {
+    G.score += 500;
+    $("#shell").classList.add("perfect-wave-flash");
+    setTimeout(() => $("#shell").classList.remove("perfect-wave-flash"), 1600);
+  }
+
   $("#wave-clear-title").textContent = `WAVE ${G.wave} CLEAR`;
-  $("#wave-clear-sub").textContent = G.wave === WAVES.length ? "You scheduled the cluster." : "Onward.";
+  $("#wave-clear-sub").innerHTML = isPerfectWave
+    ? `<span style="color: var(--gold-warm);">★ PERFECT WAVE · +500 bonus ★</span>`
+    : G.wave === WAVES.length ? "You scheduled the cluster." : "Onward.";
   $("#wave-stats").innerHTML = `
     <span>Pods placed</span><span>${G.placedCount}/${def.podCount}</span>
     <span>Perfect nodes</span><span>${G.waveStats.perfectNodes}</span>
     <span>Tight fits</span><span>${G.waveStats.tightFits}</span>
+    <span>Affinity pairs</span><span>${G.waveStats.paired}</span>
     <span>Preemptions</span><span>${G.waveStats.preempts}</span>
+    <span>Autoscaler used</span><span>${G.waveStats.bailouts}</span>
+    <span>Best combo</span><span>×${G.bestCombo + 1}</span>
     <span>Current score</span><span>${G.score.toLocaleString()}</span>
   `;
-  $("#wave-lesson").innerHTML = WAVE_LESSONS[G.wave - 1] || "On to the next.";
-  if (G.wave === WAVES.length) victory();
-  else $("#screen-wave-clear").style.display = "flex";
+  // Reset per-wave next-only modifiers BEFORE next wave
+  // (we consume them when offered/applied; otherwise reset to defaults)
+  $("#wave-lesson").innerHTML = (G.endlessActive ? "Endless mode: each wave gets a bit harder. Track your best." : WAVE_LESSONS[G.wave - 1] || "On to the next.");
+  if (G.wave === WAVES.length && !G.endlessActive) {
+    victory();
+    return;
+  }
+  // Update achievement progress
+  const st = loadAchievementState();
+  st.maxWaveReached = Math.max(st.maxWaveReached || 0, G.wave + 1);
+  if (isPerfectWave) st.perfectWavesEver = (st.perfectWavesEver || 0) + 1;
+  if (G.waveStats.bailouts === 0 && G.wave >= 7) st.frugalWavesEver = (st.frugalWavesEver || 0) + 1;
+  if (G.bestCombo > (st.maxComboEver || 0)) st.maxComboEver = G.bestCombo;
+  if (G.score > (st.maxScoreEver || 0)) st.maxScoreEver = G.score;
+  saveAchievementState(st);
+  $("#screen-wave-clear").style.display = "flex";
 }
 
 function nextWave() {
@@ -1488,10 +2310,59 @@ function nextWave() {
   startWave(G.wave + 1);
 }
 
+function renderFinalBoard(stuckPod) {
+  const wrap = $("#over-final-board");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  for (const n of G.nodes) {
+    const blob = document.createElement("div");
+    blob.className = "mini-node";
+    const cpuPct = Math.round((nodeUsedCpu(n) / n.cpu) * 100);
+    const memPct = Math.round((nodeUsedMem(n) / n.mem) * 100);
+    blob.innerHTML = `
+      <header><span>${n.name}</span><span>${cpuPct}/${memPct}%</span></header>
+      <div class="mini-fill">${n.pods.map(p => `<div class="blip" style="background:${p.color}; width:${4 + p.cpu*2}px; height:${4 + p.mem*2}px;" title="${p.name}: ${p.cpu}c/${p.mem}m"></div>`).join("")}</div>
+    `;
+    wrap.appendChild(blob);
+  }
+  if (stuckPod) {
+    const stuck = document.createElement("div");
+    stuck.className = "stuck-pod";
+    stuck.innerHTML = `${podHexSvg(stuckPod, 36)}<div><b>${stuckPod.name}</b></div><div>nowhere to land</div>`;
+    wrap.appendChild(stuck);
+  }
+}
+
 function gameOver(stuckPod) {
   G.state = "gameOver";
   setBestScore(G.score);
   sfx("defeat");
+  renderFinalBoard(stuckPod);
+
+  // Update achievements
+  const st = loadAchievementState();
+  st.maxWaveReached = Math.max(st.maxWaveReached || 0, G.wave);
+  if (G.score > (st.maxScoreEver || 0)) st.maxScoreEver = G.score;
+  if (G.bestCombo > (st.maxComboEver || 0)) st.maxComboEver = G.bestCombo;
+  if (!G.runHadAnyPreempt && G.wave >= 3) st.pacifistRun = true;
+  saveAchievementState(st);
+
+  if (G.lastGenerationSolvable === false) {
+    $("#over-title").textContent = "OUR FAULT";
+    $("#over-sub").textContent = "The generator gave you a wave that wasn't solvable.";
+    $("#over-stats").innerHTML = `
+      <span>Wave reached</span><span>${G.wave}/${WAVES.length}</span>
+      <span>Pods placed (run)</span><span>${G.totalPlacedThisRun}</span>
+      <span>Best ever</span><span>${bestScore().toLocaleString()}</span>
+    `;
+    $("#over-lesson").innerHTML = `
+      <strong>Sorry — that was on us.</strong><br>
+      Our wave generator couldn't find a solvable arrangement for this seed. In production, the equivalent would be a scheduler stuck with no valid placement — a real cluster's answer is "add more capacity," which is what the <em>Cluster Autoscaler</em> bailout button models. Restart and try again — the next seed will be playable.
+    `;
+    $("#screen-game-over").style.display = "flex";
+    return;
+  }
+
   const fit = stuckPod ? `${stuckPod.name} (${stuckPod.cpu}C/${stuckPod.mem}M${stuckPod.taint ? ", "+stuckPod.taint:""}${stuckPod.affinityGroup?", "+stuckPod.affinityGroup:""})` : "a pod";
   $("#over-title").textContent = "GAME OVER";
   $("#over-sub").textContent = `${fit} couldn't find a home.`;
@@ -1526,15 +2397,55 @@ function victory() {
   $("#victory-stats").innerHTML = `
     <span>Final score</span><span>${G.score.toLocaleString()}</span>
     <span>Pods placed (run)</span><span>${G.totalPlacedThisRun}</span>
+    <span>Best combo</span><span>×${G.bestCombo + 1}</span>
+    <span>Boons taken</span><span>${G.activeMods ? G.activeMods.length : 0}</span>
     <span>Best ever</span><span>${Math.max(bestScore(), G.score).toLocaleString()}</span>
   `;
   $("#victory-lesson").innerHTML = WAVE_LESSONS[WAVES.length - 1];
+  // Update permanent achievements
+  const st = loadAchievementState();
+  st.maxWaveReached = Math.max(st.maxWaveReached || 0, 11);
+  if (G.score > (st.maxScoreEver || 0)) st.maxScoreEver = G.score;
+  if (G.bestCombo > (st.maxComboEver || 0)) st.maxComboEver = G.bestCombo;
+  st.uniqueBoonsTaken = G.uniqueBoonsTaken || [];
+  saveAchievementState(st);
   $("#screen-victory").style.display = "flex";
 }
 
 /* ─── Input wiring ─────────────────────────────────────────────────────── */
 $("#board").addEventListener("click", e => {
-  if (G.preemptMode) return; // preempt mode handles its own clicks on pod-minis
+  if (G.preemptMode) return; // preempt mode handles its own clicks
+  // Defragmenter: if charges available + click on a placed non-stateful pod, take it back
+  if (G.modifiers && G.modifiers.defragChargesNext > 0) {
+    const miniEl = e.target.closest(".pod-mini");
+    if (miniEl) {
+      const podId = miniEl.dataset.podId;
+      // Find which node holds this pod
+      for (const n of G.nodes) {
+        const idx = n.pods.findIndex(p => p.id === podId);
+        if (idx >= 0) {
+          const p = n.pods[idx];
+          if (p.stateful) {
+            $("#message").innerHTML = "<span style='color:var(--orange);'>Stateful pods can't be defragged.</span>";
+            sfx("invalid"); return;
+          }
+          // Take back to queue (front)
+          n.pods.splice(idx, 1);
+          G.visibleQueue.unshift(p);
+          while (G.visibleQueue.length > 3 && G.pendingQueue.length > 0) {
+            G.pendingQueue.unshift(G.visibleQueue.pop());
+          }
+          G.modifiers.defragChargesNext--;
+          sfx("hold");
+          $("#message").innerHTML = `<span style='color:var(--cyan);'>⏪ Defragmented ${p.name} back to queue.</span> ${G.modifiers.defragChargesNext} charge(s) left.`;
+          renderBoard();
+          renderQueue();
+          renderRunModifiers();
+          return;
+        }
+      }
+    }
+  }
   const nodeEl = e.target.closest(".node");
   if (!nodeEl) return;
   const idx = G.nodes.findIndex(n => n.id === parseInt(nodeEl.dataset.nodeId, 10));
@@ -1551,6 +2462,7 @@ window.addEventListener("keydown", e => {
     if (confirm("Restart from Wave 1?")) restart();
     return;
   }
+  if (e.code === "KeyN") { useAutoscaler(); return; }
   const num = parseInt(e.key, 10);
   if (!isNaN(num) && num >= 1 && num <= G.nodes.length) {
     placeCurrentOn(num - 1);
@@ -1558,23 +2470,695 @@ window.addEventListener("keydown", e => {
 });
 
 /* ─── Init / screen wiring ─────────────────────────────────────────────── */
+/* ─── Boons (between-wave upgrades) ────────────────────────────────────
+   After each cleared wave we offer three random boons. The player picks one.
+   Boons either modify a single wave (e.g., +1 bailout) or persist for the
+   rest of the run (e.g., score multiplier). This is the Slay-the-Spire shape
+   that gives each run its own identity. */
+
+const BOON_POOL = [
+  // ─── Permanent build-defining ──────────────────────────────────────────
+  // Tuned against simulation: Crown was 2x perfect → +59%. Now 1.5x → ~+30%.
+  { id: "perfect-bonus",  icon: "♛", name: "Crown the Perfect",
+    desc: "Perfect packs award +300 (was +200). Permanent.",
+    scope: "permanent", apply: () => { G.modifiers.perfectMult = 1.5; } },
+  // Pair Affinity buffed to 2.5x since pair pods are rare — must reward more.
+  { id: "pair-double",    icon: "↔", name: "Pair Affinity ×3",
+    desc: "Co-locating pair pods awards +180 (was +60) — a real reward when pairs show up. Permanent.",
+    scope: "permanent", apply: () => { G.modifiers.pairMult = 3; } },
+  // Combo Sustain buffed to two graces per wave (was 1; gave only +1%).
+  { id: "combo-keep",     icon: "↻", name: "Combo Sustain",
+    desc: "Up to TWO bad packs per wave can pass without breaking your combo. Permanent.",
+    scope: "permanent", apply: () => { G.modifiers.comboGrace = 2; } },
+  // Tight bonus was no-op (optimal play rarely lands tight). Replaced with
+  // "Slack Bonus" — rewards all non-perfect placements with leftover ≤ 2.
+  { id: "slack-bonus",    icon: "◈", name: "Slack Bonus",
+    desc: "When a node has ≤2 CPU and ≤2 mem unused after a placement, +50 bonus. Permanent.",
+    scope: "permanent", apply: () => { G.modifiers.slackBonus = true; } },
+  // NEW: permanent +1 defrag charge per wave. Strategic build.
+  { id: "defrag-mastery", icon: "⏪", name: "Defrag Mastery",
+    desc: "Gain 1 defrag charge at the start of every wave from now on. Permanent.",
+    scope: "permanent", apply: () => { G.modifiers.permaDefrag = (G.modifiers.permaDefrag || 0) + 1; } },
+
+  // ─── Next-wave, modest help ────────────────────────────────────────────
+  { id: "score-mult",     icon: "✦", name: "Score Multiplier",
+    desc: "All points earned next wave are worth 30% more.",
+    scope: "next wave", apply: () => { G.modifiers.scoreMultNext = 1.3; } },
+  { id: "lookahead",      icon: "👁", name: "Far Sight",
+    desc: "Reveal 5 pods in the queue next wave (info only, no capacity gift).",
+    scope: "next wave", apply: () => { G.modifiers.lookaheadNext = 5; } },
+  { id: "bailout-plus",   icon: "⚡", name: "Surge Capacity",
+    desc: "+1 autoscaler bailout on the next wave.",
+    scope: "next wave", apply: () => { G.modifiers.extraBailoutsNext += 1; } },
+  // Mini Node reduced from 4/4 to 3/3 — smaller modest help.
+  { id: "extra-node",     icon: "⊞", name: "Mini Node",
+    desc: "Spawn one extra non-tainted node next wave at 2 CPU / 2 mem (just a slot or two of slack).",
+    scope: "next wave", apply: () => { G.modifiers.extraMiniNodeNext = true; } },
+
+  // ─── Strategic / interactive ───────────────────────────────────────────
+  { id: "defrag",         icon: "⏪", name: "Defragmenter",
+    desc: "Two defrag charges next wave: click a placed non-stateful pod to send it back to the queue.",
+    scope: "next wave", apply: () => { G.modifiers.defragChargesNext = (G.modifiers.defragChargesNext || 0) + 2; } },
+
+  // ─── Risk / reward — for daring runs ───────────────────────────────────
+  // Reckless Surge: nodes 7/7 (was 6/6 — too harsh). Still a real trade.
+  { id: "reckless",       icon: "⚔", name: "Reckless Surge",
+    desc: "+3 bailouts AND score ×1.2 next wave — but every node loses 1 CPU (8→7). The cost of insurance.",
+    scope: "next wave", apply: () => { G.modifiers.extraBailoutsNext += 3; G.modifiers.shrinkNodesNext = true; G.modifiers.scoreMultNext = Math.max(G.modifiers.scoreMultNext || 1, 1.2); } },
+  // Lean & Mean was +99% (dominant). Now 1.4x — comparable to Score Multiplier
+  // but with real cost (no hold, no bailouts).
+  { id: "lean-mean",      icon: "✸", name: "Lean & Mean",
+    desc: "Score ×1.4 next wave. But: no hold slot, and no autoscaler bailouts.",
+    scope: "next wave", apply: () => { G.modifiers.scoreMultNext = 1.4; G.modifiers.disableHoldNext = true; G.modifiers.zeroBailoutsNext = true; } },
+];
+
+function offerBoons() {
+  // Pick 3 random distinct boons. Bias toward variety.
+  const pool = shuffle(BOON_POOL.slice());
+  const offered = pool.slice(0, 3);
+  const grid = $("#boon-grid");
+  grid.innerHTML = "";
+  for (const b of offered) {
+    const card = document.createElement("div");
+    card.className = "boon-card";
+    card.innerHTML = `
+      <div class="icon">${b.icon}</div>
+      <div class="name">${b.name}</div>
+      <div class="desc">${b.desc}</div>
+      <div class="scope">${b.scope}</div>
+    `;
+    card.addEventListener("click", () => takeBoon(b));
+    grid.appendChild(card);
+  }
+  $("#screen-boon").style.display = "flex";
+}
+
+function takeBoon(boon) {
+  boon.apply();
+  G.activeMods = G.activeMods || [];
+  G.activeMods.push(boon);
+  G.uniqueBoonsTaken = G.uniqueBoonsTaken || [];
+  if (!G.uniqueBoonsTaken.includes(boon.id)) G.uniqueBoonsTaken.push(boon.id);
+  $("#screen-boon").style.display = "none";
+  sfx("hold");
+  renderRunModifiers();
+  startWave(G.wave + 1);
+}
+
+/* ─── Achievements ──────────────────────────────────────────────────────── */
+
+const ACHIEVEMENTS = [
+  { id: "first-run",    icon: "✓",  name: "First Step",       check: g => g.wave >= 1 && g.placedCount >= 5 },
+  { id: "wave-1",       icon: "①",  name: "Wave 1 Cleared",   check: g => g.maxWaveReached >= 2 },
+  { id: "wave-5",       icon: "⑤",  name: "Halfway",          check: g => g.maxWaveReached >= 6 },
+  { id: "wave-10",      icon: "👑", name: "Conqueror",        check: g => g.maxWaveReached >= 11 },
+  { id: "perfect-wave", icon: "★",  name: "Perfect Wave",     check: g => g.perfectWavesEver >= 1 },
+  { id: "frugal",       icon: "⚡", name: "Frugal",          check: g => g.frugalWavesEver >= 1 },
+  { id: "pacifist",     icon: "☮",  name: "Pacifist",         check: g => g.pacifistRun },
+  { id: "combo-10",     icon: "🔥", name: "10× Combo",         check: g => g.maxComboEver >= 9 },
+  { id: "endless",      icon: "∞",  name: "Endless · Wave 15", check: g => g.maxWaveReached >= 16 },
+  { id: "score-10k",    icon: "✦",  name: "10,000 Score",     check: g => g.maxScoreEver >= 10000 },
+  { id: "score-25k",    icon: "✦✦", name: "25,000 Score",     check: g => g.maxScoreEver >= 25000 },
+  { id: "all-boons",    icon: "♛",  name: "Boon Collector",   check: g => g.uniqueBoonsTaken && g.uniqueBoonsTaken.length >= 7 },
+];
+
+function loadAchievementState() {
+  try {
+    const raw = localStorage.getItem("podTetris.ach");
+    if (!raw) return { maxWaveReached: 0, perfectWavesEver: 0, frugalWavesEver: 0, pacifistRun: false, maxComboEver: 0, maxScoreEver: 0, uniqueBoonsTaken: [] };
+    return JSON.parse(raw);
+  } catch { return { maxWaveReached: 0, perfectWavesEver: 0, frugalWavesEver: 0, pacifistRun: false, maxComboEver: 0, maxScoreEver: 0, uniqueBoonsTaken: [] };  }
+}
+function saveAchievementState(st) { try { localStorage.setItem("podTetris.ach", JSON.stringify(st)); } catch {} }
+function updateAchievements(patches) {
+  const st = loadAchievementState();
+  Object.assign(st, patches);
+  saveAchievementState(st);
+}
+function renderAchievements() {
+  const list = $("#achievements-list");
+  if (!list) return;
+  const st = { ...loadAchievementState(), wave: 0, placedCount: 0 }; // for check()
+  list.innerHTML = "";
+  for (const a of ACHIEVEMENTS) {
+    const unlocked = a.check(st);
+    const div = document.createElement("div");
+    div.className = "ach" + (unlocked ? " unlocked" : "");
+    div.innerHTML = `<div class="ach-icon">${a.icon}</div><div class="ach-name">${unlocked ? a.name : "?"}</div>`;
+    div.title = unlocked ? a.name : "locked";
+    list.appendChild(div);
+  }
+}
+
+/* Run-modifier strip — visible at bottom of board during play */
+function renderRunModifiers() {
+  const el = $("#run-modifiers");
+  if (!el) return;
+  el.innerHTML = "";
+  const showing = [];
+  if (G.modifiers.perfectMult > 1) showing.push("♛ Crown ×" + G.modifiers.perfectMult);
+  if (G.modifiers.pairMult > 1) showing.push("↔ Pair ×" + G.modifiers.pairMult);
+  if (G.modifiers.slackBonus) showing.push("◈ Slack +50");
+  if (G.modifiers.comboGrace > 0) showing.push("↻ Combo Sustain ×" + G.modifiers.comboGrace);
+  if (G.modifiers.permaDefrag > 0) showing.push("⏪ Defrag Mastery");
+  if (G.modifiers.scoreMultNext > 1) showing.push("✦ Score +" + Math.round((G.modifiers.scoreMultNext - 1) * 100) + "%");
+  if (G.modifiers.lookaheadNext > 3) showing.push("👁 Far Sight");
+  if (G.modifiers.extraMiniNodeNext) showing.push("⊞ Mini Node");
+  if (G.modifiers.extraBailoutsNext > 0) showing.push("⚡ +" + G.modifiers.extraBailoutsNext + " bailout");
+  if (G.modifiers.shrinkNodesNext) showing.push("⚠ Nodes 7/7");
+  if (G.modifiers.disableHoldNext) showing.push("✸ No hold");
+  if (G.modifiers.zeroBailoutsNext) showing.push("✸ No bailouts");
+  for (const s of showing) {
+    const m = document.createElement("div");
+    m.className = "mod";
+    m.textContent = s;
+    el.appendChild(m);
+  }
+}
+
+/* ─── Endless mode ──────────────────────────────────────────────────────── */
+function buildEndlessWave(n) {
+  // n is 1-indexed past wave 10. Difficulty rises smoothly.
+  const baseDensity = Math.min(0.95, 0.85 + n * 0.01);
+  // More nodes the further you go — model the cluster autoscaler "in the world"
+  const extraNodes = Math.min(4, Math.floor(n / 3));
+  const nodes = [];
+  for (let i = 0; i < 4 + extraNodes; i++) nodes.push({ id: i, name: `node-${i+1}`, cpu: 8, mem: 8, taints: [] });
+  // GPU nodes scale too
+  const gpuNodes = 1 + Math.floor(n / 4);
+  for (let i = 0; i < gpuNodes; i++) nodes.push({ id: 100+i, name: `gpu-${i+1}`, cpu: 8, mem: 8, taints: ["gpu"] });
+  return {
+    title: `Endless · Wave ${10 + n}`,
+    intro: `<b>Endless Wave ${10 + n}.</b> Beyond the crucible. Density ${Math.round(baseDensity*100)}%.`,
+    density: baseDensity,
+    nodeTemplate: nodes,
+    podCount: 26 + Math.floor(n * 1.2),
+    podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
+    bailouts: 2 + Math.floor(n / 3),
+    constraints: {
+      affinity: [
+        { label: "auth",   count: Math.min(nodes.filter(no=>no.taints.length===0).length, 3) },
+        { label: "api",    count: Math.min(nodes.filter(no=>no.taints.length===0).length, 3) },
+        { label: "search", count: Math.min(nodes.filter(no=>no.taints.length===0).length, 3) },
+        { label: "ads",    count: 2 },
+      ],
+      taints: 4 + Math.floor(n / 2),
+      stateful: true,
+      priority: Math.min(5, 2 + Math.floor(n / 3)),
+      affinityPair: Math.min(5, 2 + Math.floor(n / 4)),
+    },
+  };
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   8-bit Russian-folk music engine
+   ─────────────────────────────────
+   A small chiptune sequencer that runs on Web Audio. Three tracks:
+     "tundra"  — slow, contemplative, A minor — title + menus
+     "spool"   — mid-tempo dance, harmonic minor — main gameplay
+     "crucible" — fast, dense, tense — endless mode + wave 10
+
+   Each track is a tracker-style array of step events. We schedule notes
+   ahead of time using AudioContext.currentTime to avoid timing drift.
+
+   Why "Russian-folk"? Harmonic minor scale (the iconic augmented-2nd between
+   the 6th and raised 7th), 4/4 with strong downbeats, oompah bass on root
+   and fifth, modal repetition. Drawn from the tradition that produced
+   Kalinka, Katyusha, the Volga Boatmen — without copying any of them.
+   No Korobeiniki, as requested.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+const NOTE = {
+  A1: 55, B1: 61.74, C2: 65.41, D2: 73.42, E2: 82.41, F2: 87.31, "G#2": 103.83,
+  A2: 110, B2: 123.47, C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, "G#3": 207.65,
+  A3: 220, B3: 246.94, C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, "G#4": 415.30,
+  A4: 440, B4: 493.88, C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, "G#5": 830.61,
+  A5: 880, B5: 987.77, C6: 1046.50, D6: 1174.66, E6: 1318.51,
+};
+const _ = null;
+
+/*
+  TUNDRA — title-screen theme.
+  Slow (90 BPM), A natural minor, very sparse. Two-bar loop, contemplative.
+  Bass walks A-E-F-C oompah-style. Melody outlines the triad.
+*/
+const TRACK_TUNDRA = {
+  name: "Tundra",
+  tempo: 88,
+  loopSteps: 32,
+  melody: [
+    "A4", _, _, _, "C5", _, _, _, "E5", _, _, _, "C5", _, _, _,
+    "B4", _, _, _, "A4", _, _, "G#4", "A4", _, _, _, _, _, _, _,
+  ],
+  bass: [
+    "A2", _, _, _, _, _, _, _, "E3", _, _, _, _, _, _, _,
+    "F2", _, _, _, _, _, _, _, "C3", _, _, _, _, _, _, _,
+  ],
+  percussion: [ /* very sparse — leave undefined for silence */ ],
+};
+
+/*
+  SPOOL — gameplay theme.
+  Mid-tempo (138 BPM), A harmonic minor (note the G# — the "exotic" 7th).
+  Dance feel: bass on every downbeat, melody in syncopated 16ths.
+  Two patterns alternate to keep it fresh: A-pattern then B-pattern (variation),
+  total 64 steps (4 bars).
+*/
+const TRACK_SPOOL = {
+  name: "Hammer & Spool",
+  tempo: 138,
+  loopSteps: 64,
+  melody: [
+    // Bar 1: trace minor triad ascending
+    "A4", _, "C5", _, "E5", _, "C5", _, "F5", "E5", "D5", _, "C5", "B4", "A4", _,
+    // Bar 2: descend with harmonic-minor flavor (G#)
+    "E5", _, "F5", "E5", "G#5", _, "A5", _, "G#5", "F5", "E5", "D5", "C5", "B4", "A4", _,
+    // Bar 3: variant on bar 1 — start higher
+    "E5", _, "A5", _, "E5", _, "C5", _, "F5", "E5", "D5", _, "C5", "B4", "A4", _,
+    // Bar 4: cadence — descend to tonic
+    "B4", "C5", "D5", "E5", "D5", "C5", "B4", _, "C5", "B4", "A4", _, "E4", _, "A3", _,
+  ],
+  bass: [
+    "A2", _, _, _, "E3", _, _, _, "A2", _, _, _, "E3", _, _, _,
+    "D3", _, _, _, "A2", _, _, _, "D3", _, _, _, "A2", _, _, _,
+    "F2", _, _, _, "C3", _, _, _, "F2", _, _, _, "C3", _, _, _,
+    "E3", _, _, _, "B2", _, _, _, "E3", _, _, _, "A2", _, _, _,
+  ],
+  // Percussion pattern: kick on 1, snare on 3 (classic dance)
+  perc: [
+    "k", _, _, _, _, _, "s", _, _, _, "k", _, _, _, "s", _,
+    "k", _, _, _, _, _, "s", _, _, _, "k", _, _, _, "s", _,
+    "k", _, _, _, _, _, "s", _, _, _, "k", _, _, _, "s", _,
+    "k", _, _, _, _, _, "s", _, _, _, "k", _, _, _, "s", "s",
+  ],
+};
+
+/*
+  CRUCIBLE — late-game / endless theme.
+  Fast (168 BPM), tense, B-minor with chromatic neighbor tones.
+  More syncopation, denser melody, heavier percussion.
+*/
+const TRACK_CRUCIBLE = {
+  name: "The Crucible",
+  tempo: 168,
+  loopSteps: 64,
+  melody: [
+    "A4", "B4", "C5", "B4", "A4", _, "E5", _, "A5", "G#5", "F5", "E5", "D5", "C5", "B4", "A4",
+    "E5", _, "F5", "E5", "D5", _, "C5", "B4", "A4", _, "G#4", "A4", "B4", _, _, _,
+    "A4", "B4", "C5", "B4", "A4", _, "E5", _, "A5", _, "B5", "A5", "G#5", "F5", "E5", "D5",
+    "C5", "B4", "A4", "G#4", "A4", _, "E4", _, "A4", _, _, _, _, _, _, _,
+  ],
+  bass: [
+    "A2", _, _, _, _, _, "A2", _, "E3", _, _, _, _, _, "E3", _,
+    "F2", _, _, _, _, _, "F2", _, "C3", _, _, _, _, _, "C3", _,
+    "A2", _, "A2", _, _, _, "A2", _, "E3", _, "E3", _, _, _, "E3", _,
+    "D3", _, "D3", _, "A2", _, "A2", _, "E3", _, _, _, "A2", _, _, _,
+  ],
+  perc: [
+    "k", _, "s", _, "k", _, "s", _, "k", "k", "s", _, "k", _, "s", "s",
+    "k", _, "s", _, "k", _, "s", _, "k", "k", "s", _, "k", _, "s", "s",
+    "k", _, "s", _, "k", _, "s", _, "k", "k", "s", _, "k", _, "s", "s",
+    "k", "k", "s", _, "k", "k", "s", _, "k", _, "s", "s", "k", "s", "k", "s",
+  ],
+};
+
+const MUSIC = {
+  ctx: null,
+  master: null, melodyGain: null, bassGain: null, percGain: null,
+  enabled: true,
+  volume: 0.5,
+  current: null,
+  step: 0,
+  nextScheduleAt: 0,
+  scheduleAhead: 0.18,
+  lookaheadMs: 25,
+  timerId: null,
+
+  init() {
+    if (this.ctx) return;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch { return; }
+    this.master = this.ctx.createGain();
+    this.master.gain.value = this.volume;
+    this.master.connect(this.ctx.destination);
+
+    // Per-voice gain so we can mix
+    this.melodyGain = this.ctx.createGain();
+    this.melodyGain.gain.value = 0.20;
+    this.melodyGain.connect(this.master);
+
+    this.bassGain = this.ctx.createGain();
+    this.bassGain.gain.value = 0.35;
+    this.bassGain.connect(this.master);
+
+    this.percGain = this.ctx.createGain();
+    this.percGain.gain.value = 0.30;
+    this.percGain.connect(this.master);
+  },
+
+  play(track) {
+    this.init();
+    if (!this.ctx) return;
+    if (this.ctx.state === "suspended") this.ctx.resume();
+    if (this.current === track && this.timerId) return;
+    this.stop();
+    this.current = track;
+    this.step = 0;
+    this.nextScheduleAt = this.ctx.currentTime + 0.1;
+    this._scheduler();
+    // Update "now playing" label
+    const np = document.getElementById("now-playing-title");
+    if (np) np.textContent = track ? track.name : "—";
+  },
+
+  stop() {
+    this.current = null;
+    if (this.timerId) { clearTimeout(this.timerId); this.timerId = null; }
+    const np = document.getElementById("now-playing-title");
+    if (np) np.textContent = "—";
+  },
+
+  setEnabled(b) {
+    this.enabled = b;
+    if (!b) {
+      if (this.master) this.master.gain.value = 0;
+      this.stop();
+    } else if (this.master) {
+      this.master.gain.value = this.volume;
+    }
+    try { localStorage.setItem("podTetris.musicEnabled", b ? "1" : "0"); } catch {}
+  },
+
+  setVolume(v) {
+    this.volume = v;
+    if (this.master && this.enabled) this.master.gain.value = v;
+    try { localStorage.setItem("podTetris.musicVol", String(v)); } catch {}
+  },
+
+  _scheduler() {
+    if (!this.current || !this.enabled || !this.ctx) return;
+    const stepDur = (60 / this.current.tempo) / 4; // 16th-note in seconds
+    while (this.nextScheduleAt < this.ctx.currentTime + this.scheduleAhead) {
+      this._scheduleStep(this.step % this.current.loopSteps, this.nextScheduleAt, stepDur);
+      this.step++;
+      this.nextScheduleAt += stepDur;
+    }
+    this.timerId = setTimeout(() => this._scheduler(), this.lookaheadMs);
+  },
+
+  _scheduleStep(i, when, stepDur) {
+    const track = this.current;
+    if (!track) return;
+    // Melody (pulse-wave for chiptune feel — Web Audio's "square" is close enough)
+    const m = track.melody[i];
+    if (m && NOTE[m]) this._playPulse(NOTE[m], when, stepDur * 0.9, this.melodyGain, 0.6);
+    // Bass (triangle)
+    const b = track.bass[i];
+    if (b && NOTE[b]) this._playTriangle(NOTE[b], when, stepDur * 0.85, this.bassGain, 0.6);
+    // Percussion
+    if (track.perc) {
+      const p = track.perc[i];
+      if (p === "k") this._kick(when);
+      else if (p === "s") this._snare(when);
+    }
+  },
+
+  _playPulse(freq, when, dur, dest, vol) {
+    const osc = this.ctx.createOscillator();
+    osc.type = "square";  // closest built-in to NES pulse wave
+    osc.frequency.value = freq;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, when);
+    gain.gain.linearRampToValueAtTime(vol, when + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.001, when + dur);
+    osc.connect(gain); gain.connect(dest);
+    osc.start(when); osc.stop(when + dur + 0.02);
+  },
+
+  _playTriangle(freq, when, dur, dest, vol) {
+    const osc = this.ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, when);
+    gain.gain.linearRampToValueAtTime(vol, when + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.001, when + dur);
+    osc.connect(gain); gain.connect(dest);
+    osc.start(when); osc.stop(when + dur + 0.02);
+  },
+
+  _kick(when) {
+    // Low frequency tone with rapid pitch + amplitude decay
+    const osc = this.ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(120, when);
+    osc.frequency.exponentialRampToValueAtTime(40, when + 0.12);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0, when);
+    gain.gain.linearRampToValueAtTime(0.9, when + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.001, when + 0.18);
+    osc.connect(gain); gain.connect(this.percGain);
+    osc.start(when); osc.stop(when + 0.20);
+  },
+
+  _snare(when) {
+    // Short burst of band-limited noise + a click tone
+    const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.12, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+    const src = this.ctx.createBufferSource(); src.buffer = buf;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "highpass"; filter.frequency.value = 1200;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.5, when);
+    gain.gain.exponentialRampToValueAtTime(0.001, when + 0.10);
+    src.connect(filter); filter.connect(gain); gain.connect(this.percGain);
+    src.start(when);
+  },
+};
+
+// Track switcher — chooses the right track for current game state
+function pickTrack() {
+  if (G.state === "title" || G.state === "waveClear" || G.state === "gameOver" || G.state === "victory") {
+    return TRACK_TUNDRA;
+  }
+  if (G.endlessActive || G.wave >= 8) return TRACK_CRUCIBLE;
+  return TRACK_SPOOL;
+}
+
+function updateMusicForState() {
+  if (!MUSIC.enabled) return;
+  const t = pickTrack();
+  if (MUSIC.current !== t) MUSIC.play(t);
+}
+
+/* ─── UI polish: smooth score count-up ──────────────────────────────────── */
+
+const ScoreAnimator = {
+  current: 0, target: 0, raf: null,
+  set(value, element) {
+    this.target = value;
+    if (this.raf) cancelAnimationFrame(this.raf);
+    const start = this.current;
+    const delta = this.target - start;
+    if (Math.abs(delta) < 1) { element.textContent = this.target.toLocaleString(); this.current = this.target; return; }
+    const startTime = performance.now();
+    const duration = Math.min(800, Math.abs(delta) * 0.5 + 200);
+    element.classList.add("changed");
+    const tick = (now) => {
+      const t = Math.min(1, (now - startTime) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      this.current = Math.round(start + delta * eased);
+      element.textContent = this.current.toLocaleString();
+      if (t < 1) this.raf = requestAnimationFrame(tick);
+      else { this.current = this.target; element.classList.remove("changed"); }
+    };
+    this.raf = requestAnimationFrame(tick);
+  },
+};
+
+/* ─── Settings persistence ──────────────────────────────────────────────── */
+function loadSettings() {
+  try {
+    return {
+      musicEnabled: localStorage.getItem("podTetris.musicEnabled") !== "0",
+      sfxEnabled:   localStorage.getItem("podTetris.sfxEnabled")   !== "0",
+      musicVol:     parseFloat(localStorage.getItem("podTetris.musicVol")) || 0.5,
+      sfxVol:       parseFloat(localStorage.getItem("podTetris.sfxVol"))   || 0.8,
+    };
+  } catch { return { musicEnabled: true, sfxEnabled: true, musicVol: 0.5, sfxVol: 0.8 }; }
+}
+
+// Global SFX volume gate
+let SFX_ENABLED = true;
+let SFX_VOL = 0.8;
+const _origSfx = sfx;
+sfx = function(type) {
+  if (!SFX_ENABLED) return;
+  _origSfx(type);
+};
+
 function restart() {
   document.querySelectorAll(".screen").forEach(s => s.style.display = "none");
+  updateMusicForState();
   G.wave = 1;
   G.score = 0;
   G.combo = 0;
+  G.bestCombo = 0;
   G.totalPlacedThisRun = 0;
   G.hold = null;
+  G.endlessActive = false;
+  G.runHadAnyPreempt = false;
+  G.modifiers = {
+    // permanent
+    perfectMult: 1, tightMult: 1, pairMult: 1,
+    comboGrace: 0, slackBonus: false, permaDefrag: 0,
+    // next-wave-only
+    extraBailoutsNext: 0, scoreMultNext: 1, lookaheadNext: 3, podShrinkNext: 1,
+    leanPodsNext: false, extraMiniNodeNext: false, defragChargesNext: 0,
+    shrinkNodesNext: false, disableHoldNext: false, zeroBailoutsNext: false,
+    extraNodeNext: false, freeEvictNext: false,
+  };
+  G.activeMods = [];
+  G.uniqueBoonsTaken = [];
   startWave(1);
 }
 
+/* Cluster Autoscaler bailout. Adds a fresh non-tainted node to the board.
+   Limited per wave. Costs nothing in score (we want this used) but the
+   button shows the count remaining so the player feels the constraint. */
+function useAutoscaler() {
+  if (G.state !== "playing") return;
+  if (G.bailoutsRemaining <= 0) {
+    $("#message").innerHTML = `<span style="color:var(--orange);">No autoscaler bailouts left this wave.</span> Plan with what you have.`;
+    sfx("invalid");
+    return;
+  }
+  G.bailoutsRemaining--;
+  G.bailoutsUsedThisWave++;
+  G.waveStats.bailouts++;
+  G.nodeBailoutSequence++;
+  const newNodeId = 100 + G.nodes.length + G.nodeBailoutSequence;
+  const newNode = {
+    id: newNodeId,
+    name: "node-as" + G.nodeBailoutSequence,
+    cpu: 8, mem: 8,
+    taints: [],
+    pods: [],
+    _justSpawned: true,
+  };
+  G.nodes.push(newNode);
+  G.waveTotalCpuCap += newNode.cpu;
+  G.waveTotalMemCap += newNode.mem;
+  sfx("wave-start");
+  $("#message").innerHTML = `<span style="color:var(--cyan);">⚡ Cluster Autoscaler spawned ${newNode.name}.</span> One more landing zone.`;
+  renderBoard();
+  updateBailoutHUD();
+  refreshPlacementHints();
+}
+
+function updateBailoutHUD() {
+  const btn = $("#autoscaler-btn");
+  const left = $("#bailouts-left");
+  left.textContent = String(G.bailoutsRemaining);
+  btn.disabled = G.bailoutsRemaining <= 0 || G.state !== "playing";
+}
+
+$("#autoscaler-btn").addEventListener("click", useAutoscaler);
+
 $("#btn-start").addEventListener("click", () => { ensureAudio(); restart(); });
-$("#btn-next-wave").addEventListener("click", () => { nextWave(); });
+$("#btn-next-wave").addEventListener("click", () => {
+  $("#screen-wave-clear").style.display = "none";
+  // Reset 'next-wave-only' modifiers before offering new ones
+  if (G.modifiers) {
+    G.modifiers.scoreMultNext = 1;
+    G.modifiers.lookaheadNext = 3;
+    G.modifiers.podShrinkNext = 1;
+    G.modifiers.extraBailoutsNext = 0;
+    G.modifiers.freeEvictNext = false;
+    G.modifiers.leanPodsNext = false;
+    G.modifiers.extraMiniNodeNext = false;
+    G.modifiers.defragChargesNext = 0;
+    G.modifiers.shrinkNodesNext = false;
+    G.modifiers.disableHoldNext = false;
+    G.modifiers.zeroBailoutsNext = false;
+  }
+  offerBoons();
+});
+$("#btn-boon-skip").addEventListener("click", () => {
+  $("#screen-boon").style.display = "none";
+  startWave(G.wave + 1);
+});
 $("#btn-retry").addEventListener("click", () => restart());
 $("#btn-victory-replay").addEventListener("click", () => restart());
+$("#btn-continue-endless").addEventListener("click", () => {
+  document.querySelectorAll(".screen").forEach(s => s.style.display = "none");
+  G.endlessActive = true;
+  // Continue with current score/combo/mods
+  // Append endless waves to WAVES (or override startWave to fetch them)
+  startWave(G.wave + 1);
+});
 
 const best = bestScore();
 $("#best-display").textContent = best > 0 ? `Best: ${best.toLocaleString()}` : "";
+renderAchievements();
+
+// ─── Settings drawer wiring ─────────────────────────────────────────────
+(function initSettings() {
+  const s = loadSettings();
+  MUSIC.enabled = s.musicEnabled;
+  MUSIC.volume = s.musicVol;
+  SFX_ENABLED = s.sfxEnabled;
+  SFX_VOL = s.sfxVol;
+  // Sync UI
+  const musicToggle = $("#music-toggle");
+  const sfxToggle = $("#sfx-toggle");
+  musicToggle.classList.toggle("on", s.musicEnabled);
+  sfxToggle.classList.toggle("on", s.sfxEnabled);
+  $("#music-vol").value = String(s.musicVol * 100);
+  $("#sfx-vol").value = String(s.sfxVol * 100);
+  $("#music-btn").classList.toggle("active", s.musicEnabled);
+  $("#sfx-btn").classList.toggle("active", s.sfxEnabled);
+
+  function applyMusic(on) {
+    MUSIC.setEnabled(on);
+    musicToggle.classList.toggle("on", on);
+    $("#music-btn").classList.toggle("active", on);
+    if (on) updateMusicForState();
+  }
+  function applySfx(on) {
+    SFX_ENABLED = on;
+    sfxToggle.classList.toggle("on", on);
+    $("#sfx-btn").classList.toggle("active", on);
+    try { localStorage.setItem("podTetris.sfxEnabled", on ? "1" : "0"); } catch {}
+  }
+  $("#music-btn").addEventListener("click", () => applyMusic(!MUSIC.enabled));
+  $("#sfx-btn").addEventListener("click", () => applySfx(!SFX_ENABLED));
+  musicToggle.addEventListener("click", () => applyMusic(!MUSIC.enabled));
+  sfxToggle.addEventListener("click", () => applySfx(!SFX_ENABLED));
+  $("#music-vol").addEventListener("input", e => MUSIC.setVolume(parseInt(e.target.value, 10) / 100));
+  $("#sfx-vol").addEventListener("input", e => { SFX_VOL = parseInt(e.target.value, 10) / 100; try { localStorage.setItem("podTetris.sfxVol", String(SFX_VOL)); } catch {} });
+
+  // Settings drawer
+  $("#settings-btn").addEventListener("click", e => {
+    e.stopPropagation();
+    $("#settings-drawer").classList.toggle("visible");
+  });
+  document.addEventListener("click", e => {
+    if (!e.target.closest("#settings-drawer") && !e.target.closest("#settings-btn")) {
+      $("#settings-drawer").classList.remove("visible");
+    }
+  });
+})();
+
+// Start music when the user first interacts (Web Audio policy)
+document.addEventListener("click", function startMusicOnce() {
+  MUSIC.init();
+  updateMusicForState();
+  document.removeEventListener("click", startMusicOnce);
+}, { once: true });
+
 </script>
 </body>
 </html>
