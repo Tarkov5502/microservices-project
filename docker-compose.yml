@@ -1,0 +1,216 @@
+# =============================================================================
+# docker-compose.yml — Local Development Environment
+#
+# PURPOSE: Run the entire platform locally without any Azure account.
+#          Replaces Azure services with local equivalents:
+#            Azure PostgreSQL → postgres:16
+#            Azure Redis      → redis:7-alpine
+#            Azure Service Bus → (gracefully disabled in notification-service)
+#
+# USAGE:
+#   docker compose up --build           # Start everything
+#   docker compose up user-service      # Start one service + its dependencies
+#   docker compose logs -f api-gateway  # Tail logs from one service
+#   docker compose down -v              # Stop + delete volumes (fresh DB)
+#
+# PORTS:
+#   API Gateway:            http://localhost:8000
+#   User Service:           http://localhost:8001  (direct, bypass gateway)
+#   Task Service:           http://localhost:8002
+#   Notification Service:   http://localhost:8003
+#   PostgreSQL:             localhost:5432
+#   Redis:                  localhost:6379
+#   Prometheus:             http://localhost:9090
+#   Grafana:                http://localhost:3000  (admin / admin)
+#
+# WHAT YOU'LL LEARN:
+#   - Docker Compose service dependencies (depends_on + healthchecks)
+#   - Shared networks vs isolated services
+#   - Environment variable injection for local vs cloud config
+#   - Health checks as readiness gates (mirrors K8s readiness probes)
+# =============================================================================
+
+services:
+
+  # ─── Infrastructure ─────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppassword
+      POSTGRES_DB: appdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Init script creates per-service databases
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+  # ─── Microservices ───────────────────────────────────────────────────────────
+
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: "postgresql://appuser:apppassword@postgres:5432/userdb"
+      REDIS_URL: "redis://redis:6379"
+      # Deveak secret is allowed (config.py skips validation in dev)
+      JWT_SECRET: "dev-only-secret-change-in-production-please"
+      JWT_EXPIRY_MINUTES: "60"
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+    restart: unless-stopped
+
+  task-service:
+    build:
+      context: ./services/task-service
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: "postgresql://appuser:apppassword@postgres:5432/taskdb"
+      REDIS_URL: "redis://redis:6379"
+      # SERVICEBUS_CONNECTION_STRING intentionally omitted — events log locally
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: development
+      # SERVICEBUS_CONNECTION_STRING left empty = consumer disabled (graceful local dev mode)
+      # Set this to your Azure Service Bus connection string to enable event processing
+      SERVICEBUS_CONNECTION_STRING: ""
+    ports:
+      - "8003:8003"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: development
+      JWT_SECRET: "dev-only-secret-change-in-production-please"
+      USER_SERVICE_URL: "http://user-service:8001"
+      TASK_SERVICE_URL: "http://task-service:8002"
+      NOTIFICATION_SERVICE_URL: "http://notification-service:8003"
+      ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      RATE_LIMIT_REQUESTS: "200"
+      AUTH_RATE_LIMIT_REQUESTS: "20"
+    ports:
+      - "8000:8000"
+    depends_on:
+      user-service:
+        condition: service_healthy
+      task-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ─── Observability ───────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - backend
+    depends_on:
+      - api-gateway
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - backend
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  backend:
+    driver: bridge

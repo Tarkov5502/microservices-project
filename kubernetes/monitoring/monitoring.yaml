@@ -1,0 +1,116 @@
+# =============================================================================
+# KUBERNETES: Monitoring Stack
+# PURPOSE: Deploy Prometheus and Grafana into the monitoring namespace.
+#          This uses the community Helm charts — the recommended production approach.
+#
+# WHAT YOU'LL LEARN:
+#   - Prometheus operator vs standalone Prometheus
+#   - ServiceMonitor CRD for automatic scraping
+#   - Persistent storage for metrics and dashboards
+#   - The difference between push (Grafana Cloud) and pull (Prometheus) metrics
+#
+# INSTALLATION (run once after cluster setup):
+#
+#   # Add the Prometheus Community Helm chart repository
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#
+#   # Install the kube-prometheus-stack (Prometheus + Grafana + AlertManager)
+#   # This is the production-standard way — the raw manifests below are for learning.
+#   helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring \
+#     --create-namespace \
+#     --values kubernetes/monitoring/prometheus-values.yaml \
+#     --wait
+#
+# HOW PROMETHEUS DISCOVERS YOUR SERVICES:
+#   The kube-prometheus-stack installs the Prometheus Operator, which watches
+#   for ServiceMonitor CRDs. When you create a ServiceMonitor that selects your
+#   pods, Prometheus automatically starts scraping them — no config reloads needed.
+# =============================================================================
+
+# ─── Prometheus Helm values override ─────────────────────────────────────────
+# This is not a K8s manifest — it's a Helm values file read with --values.
+# Stored here so it's version-controlled alongside everything else.
+#
+# To view all available options: helm show values prometheus-community/kube-prometheus-stack
+---
+# ─── ServiceMonitor: auto-discover our microservices ─────────────────────────
+# The Prometheus Operator watches for ServiceMonitor objects. When it finds one,
+# it automatically configures Prometheus to scrape the matched services.
+# No manual prometheus.yml editing needed!
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: microservices-monitor
+  namespace: monitoring
+  labels:
+    # This label must match the prometheus operator's serviceMonitorSelector
+    release: prometheus
+spec:
+  # Which namespace to look for services in
+  namespaceSelector:
+    matchNames:
+      - microservices
+  # Which services to scrape (matched by label)
+  selector:
+    matchLabels:
+      # All our services must have this label for auto-discovery
+      monitoring: "true"
+  endpoints:
+    - port: http         # The named port in the Service manifest
+      path: /metrics
+      interval: 15s
+
+---
+# ─── PrometheusRule: alert when pods crash ───────────────────────────────────
+# Alert rules are also defined as CRDs when using the Prometheus Operator.
+# AlertManager routes these to Slack, PagerDuty, email, etc.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: microservices-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: microservices
+      interval: 1m
+      rules:
+        # Alert when request error rate exceeds 5% over 5 minutes
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum(rate(gateway_requests_total{status_code=~"5.."}[5m]))
+              /
+              sum(rate(gateway_requests_total[5m]))
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High error rate on API gateway"
+            description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+        # Alert when p99 latency exceeds 2 seconds
+        - alert: HighLatency
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(gateway_request_duration_seconds_bucket[5m])) by (le, path)
+            ) > 2.0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High p99 latency on API gateway"
+            description: "p99 latency for {{ $labels.path }} is {{ $value }}s"
+
+        # Alert when a deployment has 0 ready replicas
+        - alert: DeploymentUnavailable
+          expr: kube_deployment_status_replicas_available{namespace="microservices"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} has no available replicas"

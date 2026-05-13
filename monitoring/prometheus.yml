@@ -1,0 +1,43 @@
+# monitoring/prometheus.yml
+#
+# Prometheus configuration for local development.
+# Scrapes metrics from all four microservices every 15 seconds.
+#
+# WHAT YOU'LL LEARN:
+#   - Prometheus pull model (it scrapes endpoints, not the other way around)
+#   - scrape_interval: how often Prometheus polls each target
+#   - static_configs: hardcoded targets (in K8s you'd use service discovery)
+#   - job_name: label added to every metric from a target (useful for filtering)
+#
+# In Kubernetes, replace static_configs with kubernetes_sd_configs and
+# rely on pod annotations (prometheus.io/scrape: "true") for auto-discovery.
+
+global:
+  scrape_interval: 15s       # Poll every 15 seconds
+  evaluation_interval: 15s   # Evaluate alert rules every 15 seconds
+
+scrape_configs:
+  - job_name: "api-gateway"
+    static_configs:
+      - targets: ["api-gateway:8000"]
+    metrics_path: /metrics
+
+  - job_name: "user-service"
+    static_configs:
+      - targets: ["user-service:8001"]
+    metrics_path: /metrics
+
+  - job_name: "task-service"
+    static_configs:
+      - targets: ["task-service:8002"]
+    metrics_path: /metrics
+
+  - job_name: "notification-service"
+    static_configs:
+      - targets: ["notification-service:8003"]
+    metrics_path: /metrics
+
+  # Prometheus scrapes its own metrics too (useful for debugging)
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -103,6 +103,19 @@ microservices-project/
 
 ---
 
+## 🐳 Local Development (No Azure Required)
+
+```bash
+docker compose up --build
+# → API Gateway:  http://localhost:8000/docs
+# → Grafana:      http://localhost:3000  (admin/admin)
+# → Prometheus:   http://localhost:9090
+```
+
+See [docs/guides/local-development.md](docs/guides/local-development.md) for a full walkthrough.
+
+---
+
 ## 🚀 Quick Start
 
 > **Prerequisites:** Azure CLI, Terraform, kubectl, Helm, Docker
@@ -152,7 +165,8 @@ helm upgrade --install notification-service ./helm/notification-service -n micro
 | [Terraform Guide](docs/terraform/terraform-guide.md) | IaC concepts, modules, state, workspaces |
 | [Kubernetes Guide](docs/kubernetes/kubernetes-guide.md) | K8s objects, networking, scaling |
 | [Security Guide](docs/security/security-guide.md) | Defence-in-depth: every security control explained |
-| [Local Development](docs/guides/getting-started.md) | Run all services locally with Docker Compose |
+| [Local Development](docs/guides/local-development.md) | Run all services with Docker Compose (no Azure needed) |
+| [Deployment Guide](docs/guides/deployment.md) | Step-by-step production deployment to AKS |
 
 ---
 

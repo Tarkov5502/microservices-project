@@ -33,19 +33,27 @@ _consumer_task: asyncio.Task | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _consumer_task
-    logger.info("Notification Service starting — launching Service Bus consumer...")
+    logger.info("Notification Service starting...")
 
-    consumer = ServiceBusConsumer(
-        connection_string=settings.servicebus_connection_string,
-        topics=[settings.servicebus_topic_tasks, settings.servicebus_topic_users],
-        subscription_name=settings.servicebus_subscription_name,
-        metrics_counter=EVENTS_PROCESSED,
-    )
+    if settings.servicebus_connection_string:
+        consumer = ServiceBusConsumer(
+            connection_string=settings.servicebus_connection_string,
+            topics=[settings.servicebus_topic_tasks, settings.servicebus_topic_users],
+            subscription_name=settings.servicebus_subscription_name,
+            metrics_counter=EVENTS_PROCESSED,
+        )
+        _consumer_task = asyncio.create_task(consumer.run(), name="servicebus-consumer")
+        logger.info("Service Bus consumer started for topics: %s, %s",
+                    settings.servicebus_topic_tasks, settings.servicebus_topic_users)
+    else:
+        # Local development mode: Service Bus not configured.
+        # Events won't be processed, but the service starts cleanly so
+        # docker-compose and local development work without Azure credentials.
+        logger.warning(
+            "SERVICEBUS_CONNECTION_STRING is not set — consumer disabled. "
+            "This is expected in local development. Set the env var to enable."
+        )
 
-    # Run the consumer loop as a background asyncio task.
-    # This lets FastAPI serve /health + /metrics while consuming messages.
-    _consumer_task = asyncio.create_task(consumer.run(), name="servicebus-consumer")
-    logger.info("Service Bus consumer started")
     yield
 
     logger.info("Shutting down consumer...")

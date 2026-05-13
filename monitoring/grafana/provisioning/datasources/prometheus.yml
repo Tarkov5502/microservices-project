@@ -1,0 +1,15 @@
+# monitoring/grafana/provisioning/datasources/prometheus.yml
+#
+# Grafana datasource auto-provisioning.
+# This file is read on startup — no manual UI configuration needed.
+# The datasource named "Prometheus" is automatically available in all dashboards.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    access: proxy
+    isDefault: true
+    editable: false
