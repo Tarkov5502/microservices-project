@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>The Arcade — three real games</title>
+<title>The Arcade — six real games</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Lora:wght@500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
@@ -51,7 +51,7 @@ header .back:hover { color: var(--honey); }
   <header>
     <a class="back" href="../">← Back to the journey</a>
     <h1>THE ARCADE</h1>
-    <h2>three games that actually teach by being fun</h2>
+    <h2>six games that actually teach by being fun</h2>
     <p>
       Each game is a tangible, replayable simulation of one specific concept. No quizzes.
       No "click next." Real game mechanics with stakes, fail states, and scoring.
@@ -60,7 +60,43 @@ header .back:hover { color: var(--honey); }
   </header>
 
   <div class="games">
-    <a class="game" href="pod-tetris.html" style="border-color: var(--gold);">
+    <a class="game" href="on-call.html" style="border-color: var(--gold);">
+      <div class="badge">CHAPTER II · KUBERNETES · SRE</div>
+      <h3>ON-CALL</h3>
+      <div class="sub">A roguelike deckbuilder about resilience.</div>
+      <p>
+        2:47 AM. The pager goes off. You have a deck of cards that map to real K8s primitives —
+        <em>Liveness Probe, Pod Disruption Budget, Circuit Breaker</em> — and a parade of production
+        incidents are coming for you. Survive 4 quarters. Defeat Black Friday, Region Outage,
+        Security Audit, and The Acquisition. Each run teaches the <em>combinatorics</em> of resilience.
+      </p>
+      <div class="meta">
+        <span>♛ <b>marquee</b></span>
+        <span>🎯 <b>roguelike run</b></span>
+        <span>📚 defense in depth</span>
+      </div>
+      <div class="play">PLAY →</div>
+    </a>
+
+    <a class="game" href="gardener.html">
+      <div class="badge">CHAPTER II · KUBERNETES</div>
+      <h3>THE GARDENER</h3>
+      <div class="sub">A parable about letting go of the hoe.</div>
+      <p>
+        You inherit an old estate. The strict rule of the head gardener: <em>you do not plant.
+        You write the plan.</em> Apprentices read your clipboard and tend the garden —
+        replanting losses, harvesting fruit, calming after storms. You'll be tempted to
+        do things by hand. Resist. The reconciler does what you wrote, forever.
+      </p>
+      <div class="meta">
+        <span>♛ <b>marquee</b></span>
+        <span>🎯 <b>6 chapters</b></span>
+        <span>📚 declarative state</span>
+      </div>
+      <div class="play">PLAY →</div>
+    </a>
+
+    <a class="game" href="pod-tetris.html">
       <div class="badge">CHAPTER II · KUBERNETES</div>
       <h3>POD TETRIS</h3>
       <div class="sub">Be the Kubernetes scheduler.</div>

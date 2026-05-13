@@ -1,0 +1,2413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Gardener — declare a garden into being</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Lora:wght@400;500;600&family=Inter:wght@400;500;600&family=Caveat:wght@500;600&display=swap" rel="stylesheet">
+<style>
+/*
+  THE GARDENER
+  ────────────
+  An interactive parable about declarative state and reconcilers — the
+  philosophical heart of Kubernetes.
+
+  You can't plant anything directly. You can only write rules on a clipboard:
+  "I want 5 oaks in this zone." Apprentice-gardeners (controllers) carry out
+  the work, continuously, autonomously. Plants die. Storms strike. Weeds
+  spawn. The controllers reconcile. You watch the garden settle and stay
+  settled — without you ever touching a hoe.
+
+  Every K8s controller pattern is teachable here:
+    - "5 of X in zone Y"           → Deployment / ReplicaSet
+    - "ordered, named specimens"   → StatefulSet
+    - "one of X in every zone"     → DaemonSet
+    - "do this once at autumn"     → Job
+    - "every day at dawn"          → CronJob
+
+  Aesthetic: cottagecore + Studio Ghibli + Mini Metro restraint.
+  Warm parchment, hand-drawn-feeling SVG plants, gentle pastel palette,
+  serif typography (Cormorant + Lora), Caveat handwriting for the clipboard.
+*/
+
+:root {
+  --paper:       #f5ecd5;
+  --paper-deep:  #e8dbb8;
+  --ink:         #3d3527;
+  --muted:       #7d7259;
+  --line:        #c8b58a;
+
+  --grass:       #8aa663;
+  --grass-deep:  #6e8a4b;
+  --soil:        #8e6f4a;
+  --soil-deep:   #6b5238;
+  --water:       #79a3a8;
+  --sky-day:     #cee0e8;
+  --sky-dawn:    #f0d4b2;
+  --sky-dusk:    #e5b896;
+  --sky-night:   #4a557a;
+
+  --oak:         #6e5236;
+  --oak-leaf:    #5d7d3e;
+  --apple:       #c75d4c;
+  --apple-leaf:  #7ba35e;
+  --herb:        #94b86a;
+  --rose:        #d68b9e;
+  --rare:        #b8965f;
+
+  --weed:        #a3623d;
+  --dead:        #6a5946;
+
+  --accent:      #a8784a;
+  --accent-warm: #c69466;
+  --good:        #5d8a4a;
+  --bad:         #b85440;
+
+  --shadow:      0 1px 2px rgba(58, 47, 31, 0.10), 0 4px 12px rgba(58, 47, 31, 0.06);
+  --shadow-deep: 0 4px 8px rgba(58, 47, 31, 0.18), 0 16px 40px rgba(58, 47, 31, 0.12);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, #faf3dd 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 50% 100%, #ede0bc 0%, transparent 50%),
+    var(--paper);
+  color: var(--ink);
+  font-family: "Lora", Georgia, serif;
+  font-size: 15px; line-height: 1.55;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The whole page gets a subtle paper texture via SVG noise */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.9' /%3E%3CfeColorMatrix values='0 0 0 0 0.2 0 0 0 0 0.16 0 0 0 0 0.10 0 0 0 0.04 0' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E");
+  opacity: 0.6;
+  mix-blend-mode: multiply;
+}
+
+#shell { position: relative; z-index: 2; height: 100vh; display: flex; flex-direction: column; }
+
+/* ─── Header ────────────────────────────────────────────────────────────── */
+header.top {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(245, 236, 213, 0.85);
+  backdrop-filter: blur(6px);
+}
+header.top .crest {
+  display: flex; align-items: center; gap: 14px;
+}
+header.top h1 {
+  font-family: "Cormorant Garamond", serif; font-size: 24px; font-weight: 600;
+  letter-spacing: 0.04em; color: var(--ink);
+}
+header.top h1 small {
+  display: block; font-family: "Lora", serif; font-size: 12px; font-style: italic;
+  font-weight: 400; color: var(--muted); margin-top: -2px;
+}
+header.top a.back {
+  color: var(--muted); text-decoration: none; font-size: 13px;
+  border: 1px solid var(--line); padding: 5px 11px; border-radius: 4px;
+  font-family: "Lora", serif;
+}
+header.top a.back:hover { color: var(--ink); border-color: var(--accent); }
+header.top .status {
+  font-family: "Cormorant Garamond", serif; font-size: 17px; color: var(--ink);
+  display: flex; gap: 18px; align-items: center;
+}
+header.top .status .item { display: flex; align-items: baseline; gap: 6px; }
+header.top .status .item small {
+  font-family: "Lora", serif; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+header.top .status .item b { font-weight: 600; }
+header.top .controls {
+  display: flex; gap: 6px;
+}
+header.top .btn-tiny {
+  background: transparent; border: 1px solid var(--line);
+  color: var(--muted); font-family: "Lora", serif; font-size: 13px;
+  padding: 4px 10px; border-radius: 4px; cursor: pointer;
+}
+header.top .btn-tiny:hover { color: var(--ink); border-color: var(--accent); background: rgba(168, 120, 74, 0.08); }
+header.top .btn-tiny.active { color: var(--ink); border-color: var(--accent); background: rgba(168, 120, 74, 0.15); }
+
+/* ─── Main layout: garden + side panel ────────────────────────────────── */
+.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 360px; gap: 0; }
+
+#garden-wrap {
+  position: relative; min-width: 0; min-height: 0;
+  overflow: hidden;
+}
+#garden-canvas {
+  display: block; width: 100%; height: 100%;
+  cursor: crosshair;
+}
+
+/* The hover ghost — where you'd add a rule */
+.overlay-tip {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(245, 236, 213, 0.95); border: 1px solid var(--line);
+  padding: 8px 16px; border-radius: 18px;
+  font-family: "Caveat", cursive; font-size: 17px; color: var(--ink);
+  box-shadow: var(--shadow);
+  pointer-events: none; opacity: 0; transition: opacity 0.3s;
+}
+.overlay-tip.visible { opacity: 1; }
+
+/* ─── Right panel — the clipboard ─────────────────────────────────────── */
+aside.clipboard {
+  background:
+    linear-gradient(180deg, rgba(245, 236, 213, 0.6) 0%, rgba(232, 219, 184, 0.4) 100%),
+    var(--paper);
+  border-left: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+aside.clipboard .clip-header {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line);
+}
+aside.clipboard .clip-header h2 {
+  font-family: "Cormorant Garamond", serif; font-size: 22px; font-weight: 600;
+  color: var(--ink); letter-spacing: 0.02em;
+}
+aside.clipboard .clip-header small {
+  font-family: "Caveat", cursive; font-size: 18px; color: var(--muted);
+  font-style: normal;
+}
+
+aside.clipboard .goal {
+  padding: 14px 22px; border-bottom: 1px solid var(--line);
+  background: rgba(168, 120, 74, 0.08);
+}
+aside.clipboard .goal .label {
+  font-family: "Lora", serif; font-size: 11px; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.15em; font-weight: 600;
+  margin-bottom: 4px;
+}
+aside.clipboard .goal .text {
+  font-family: "Cormorant Garamond", serif; font-size: 17px; line-height: 1.4;
+  color: var(--ink);
+}
+aside.clipboard .goal .progress {
+  margin-top: 8px; height: 4px; background: rgba(168, 120, 74, 0.15);
+  border-radius: 2px; overflow: hidden;
+}
+aside.clipboard .goal .progress .fill {
+  height: 100%; background: var(--accent); transition: width 0.5s;
+}
+
+aside.clipboard .scroll {
+  flex: 1; overflow-y: auto; padding: 14px 18px 18px;
+}
+
+/* The rules list — each rule is a "card" on the clipboard */
+.rule {
+  background: var(--paper);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 12px 14px; margin-bottom: 10px;
+  font-family: "Caveat", cursive; font-size: 18px;
+  cursor: pointer; transition: all 0.15s;
+  position: relative;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.rule:hover { border-color: var(--accent); background: #fbf5e0; transform: translateX(-2px); }
+.rule.satisfied { border-left: 3px solid var(--good); }
+.rule.pending   { border-left: 3px solid var(--accent-warm); }
+.rule.violated  { border-left: 3px solid var(--bad); background: #f5e8dc; }
+.rule .rule-icon {
+  position: absolute; top: 10px; right: 12px;
+  font-family: "Lora", serif; font-size: 12px;
+  color: var(--muted);
+}
+.rule .rule-icon.ok { color: var(--good); }
+.rule .rule-icon.warn { color: var(--accent-warm); }
+.rule .rule-icon.bad { color: var(--bad); }
+.rule .rule-spec {
+  display: block; color: var(--ink);
+}
+.rule .rule-status {
+  display: block; font-family: "Lora", serif; font-size: 11px;
+  color: var(--muted); font-style: italic; margin-top: 4px;
+  letter-spacing: 0.02em;
+}
+.rule .rule-type {
+  display: inline-block; font-family: "Lora", serif; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--muted); margin-bottom: 4px;
+}
+.rule .delete {
+  position: absolute; top: 8px; right: 6px;
+  background: transparent; border: none; color: var(--muted);
+  font-family: "Lora", serif; font-size: 16px; cursor: pointer; padding: 2px 6px;
+  opacity: 0; transition: opacity 0.15s;
+}
+.rule:hover .delete { opacity: 1; }
+.rule .delete:hover { color: var(--bad); }
+
+button.add-rule {
+  width: 100%; padding: 14px;
+  background: transparent; border: 2px dashed var(--line); border-radius: 6px;
+  font-family: "Caveat", cursive; font-size: 19px;
+  color: var(--accent); cursor: pointer;
+  transition: all 0.15s; margin-top: 4px;
+}
+button.add-rule:hover { border-color: var(--accent); color: var(--ink); background: rgba(168, 120, 74, 0.05); }
+
+/* Bots panel */
+.bots-section { padding: 16px 18px; border-top: 1px solid var(--line); }
+.bots-section h3 {
+  font-family: "Cormorant Garamond", serif; font-size: 16px; font-weight: 600;
+  color: var(--ink); margin-bottom: 10px;
+}
+.bots-section h3 small {
+  font-family: "Lora", serif; font-size: 11px; color: var(--muted);
+  font-style: italic; font-weight: 400;
+}
+.bot-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.bot {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; background: var(--paper); border: 1px solid var(--line);
+  border-radius: 16px; font-size: 12px;
+  font-family: "Lora", serif;
+}
+.bot.busy { border-color: var(--accent-warm); background: #fbf3dc; }
+.bot.idle { color: var(--muted); }
+.bot .bot-icon { font-size: 14px; }
+
+/* ─── Modal: rule editor ──────────────────────────────────────────────── */
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(58, 47, 31, 0.55);
+  display: none; align-items: center; justify-content: center;
+  z-index: 50; padding: 30px;
+  backdrop-filter: blur(2px);
+}
+.modal-bg.visible { display: flex; animation: modalFade 0.25s ease-out; }
+@keyframes modalFade { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  background:
+    linear-gradient(180deg, #f9f1d5 0%, var(--paper) 100%);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 30px 36px; max-width: 520px; width: 100%;
+  box-shadow: var(--shadow-deep);
+  position: relative;
+}
+.modal h2 {
+  font-family: "Cormorant Garamond", serif; font-size: 26px; font-weight: 600;
+  margin-bottom: 6px;
+}
+.modal h2 small {
+  display: block; font-family: "Caveat", cursive; font-size: 18px;
+  font-weight: 400; color: var(--muted);
+}
+.modal .form-group { margin: 18px 0; }
+.modal label {
+  display: block; font-family: "Lora", serif; font-size: 12px;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em;
+  margin-bottom: 6px;
+}
+.modal select, .modal input[type=number] {
+  width: 100%; padding: 10px 12px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 4px;
+  font-family: "Lora", serif; font-size: 15px; color: var(--ink);
+}
+.modal .rule-type-choices {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 6px;
+}
+.modal .rule-type-choices .choice {
+  padding: 12px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
+  cursor: pointer; transition: all 0.15s; font-family: "Lora", serif;
+}
+.modal .rule-type-choices .choice:hover { border-color: var(--accent); }
+.modal .rule-type-choices .choice.selected { border-color: var(--accent); background: #fbf3dc; box-shadow: 0 0 0 1px var(--accent); }
+.modal .rule-type-choices .choice .name {
+  font-family: "Cormorant Garamond", serif; font-size: 16px; font-weight: 600;
+  margin-bottom: 2px;
+}
+.modal .rule-type-choices .choice .desc {
+  font-size: 12px; color: var(--muted); line-height: 1.4;
+}
+.modal .rule-type-choices .choice .k8s {
+  font-family: "Lora", serif; font-size: 10px; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.12em; margin-top: 6px;
+}
+.modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+.modal button {
+  font-family: "Lora", serif; font-size: 14px; font-weight: 500;
+  padding: 9px 18px; border-radius: 4px; cursor: pointer; border: none;
+}
+.modal button.primary { background: var(--accent); color: var(--paper); }
+.modal button.primary:hover { background: var(--accent-warm); }
+.modal button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.modal button.ghost:hover { color: var(--ink); border-color: var(--accent); }
+
+.zone-picker {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+}
+.zone-picker .zone-btn {
+  padding: 10px; background: var(--paper); border: 1px solid var(--line); border-radius: 4px;
+  cursor: pointer; font-family: "Lora", serif; font-size: 13px; text-align: center;
+}
+.zone-picker .zone-btn:hover { border-color: var(--accent); }
+.zone-picker .zone-btn.selected { border-color: var(--accent); background: #fbf3dc; }
+
+/* ─── Screens (title, act intro, ending) ──────────────────────────────── */
+.screen {
+  position: fixed; inset: 0;
+  background: linear-gradient(180deg, #faf3dd 0%, var(--paper) 60%, #e8dbb8 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 80; padding: 40px;
+  text-align: center;
+}
+.screen .back-link {
+  position: absolute; top: 20px; left: 24px;
+  color: var(--muted); text-decoration: none; font-size: 13px;
+  padding: 5px 11px; border: 1px solid var(--line); border-radius: 4px;
+}
+.screen .back-link:hover { color: var(--ink); border-color: var(--accent); }
+.screen h1 {
+  font-family: "Cormorant Garamond", serif; font-size: 56px; font-weight: 600;
+  color: var(--ink); margin-bottom: 8px; letter-spacing: 0.02em;
+}
+.screen h2 {
+  font-family: "Caveat", cursive; font-size: 26px; color: var(--accent);
+  margin-bottom: 28px;
+}
+.screen p {
+  max-width: 560px; font-size: 16px; line-height: 1.7;
+  color: var(--ink); margin-bottom: 16px;
+}
+.screen p em { font-style: italic; color: var(--accent); }
+.screen p b { color: var(--ink); }
+.screen button {
+  font-family: "Cormorant Garamond", serif; font-size: 18px; font-weight: 600;
+  letter-spacing: 0.06em; padding: 12px 28px; margin: 8px;
+  background: var(--accent); color: var(--paper);
+  border: none; border-radius: 4px; cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: all 0.15s;
+}
+.screen button:hover { background: var(--accent-warm); transform: translateY(-1px); box-shadow: var(--shadow-deep); }
+.screen button.ghost {
+  background: transparent; color: var(--muted); border: 1px solid var(--line); box-shadow: none;
+}
+.screen button.ghost:hover { color: var(--ink); border-color: var(--accent); transform: none; }
+
+.title-illustration {
+  margin: 0 0 24px;
+}
+.title-illustration svg { display: block; }
+
+/* Story / lesson panels embedded in screens */
+.story-card {
+  max-width: 580px; margin: 18px 0;
+  background: var(--paper); border-left: 3px solid var(--accent);
+  padding: 16px 22px; border-radius: 0 6px 6px 0;
+  text-align: left; font-size: 15px; line-height: 1.7;
+  box-shadow: var(--shadow);
+}
+.story-card .speaker {
+  font-family: "Caveat", cursive; font-size: 17px;
+  color: var(--accent); margin-bottom: 4px;
+  font-style: normal;
+}
+
+/* Act-end summary */
+.act-stats {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 30px;
+  max-width: 460px; margin: 10px 0 22px;
+  font-family: "Lora", serif; font-size: 14px;
+}
+.act-stats span:nth-child(even) { color: var(--accent); text-align: right; font-weight: 600; }
+
+/* ─── Floating "huh, neat" hint that pops up during gameplay ──────────── */
+#whisper {
+  position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+  background: rgba(245, 236, 213, 0.96);
+  border: 1px solid var(--line); border-left: 4px solid var(--accent);
+  padding: 14px 24px; border-radius: 4px 8px 8px 4px;
+  max-width: 540px; font-size: 15px; line-height: 1.55;
+  font-family: "Lora", serif;
+  box-shadow: var(--shadow-deep);
+  z-index: 30;
+  animation: whisperIn 0.4s ease-out;
+}
+@keyframes whisperIn {
+  from { opacity: 0; transform: translate(-50%, 20px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+#whisper.hidden { display: none; }
+#whisper .speaker {
+  font-family: "Caveat", cursive; font-size: 16px; color: var(--accent);
+  margin-bottom: 3px;
+}
+#whisper .dismiss {
+  position: absolute; top: 8px; right: 10px;
+  background: transparent; border: none; color: var(--muted);
+  cursor: pointer; font-size: 18px;
+}
+
+/* ─── Tiny accessibility / mobile ──────────────────────────────────── */
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  aside.clipboard { max-height: 40vh; }
+  header.top { flex-wrap: wrap; gap: 8px; padding: 10px 16px; }
+  .screen h1 { font-size: 36px; }
+}
+</style>
+</head>
+<body>
+
+<div id="shell">
+  <header class="top">
+    <div class="crest">
+      <a class="back" href="../">← back</a>
+      <h1>The Gardener <small>chapter one · a parable about declarative state</small></h1>
+    </div>
+    <div class="status">
+      <div class="item"><b id="status-day">1</b><small>day</small></div>
+      <div class="item"><b id="status-season">spring</b></div>
+      <div class="item"><b id="status-weather">☀ fair</b></div>
+      <div class="item"><b id="status-essence">0</b><small>essence</small></div>
+    </div>
+    <div class="controls">
+      <button class="btn-tiny" id="speed-btn">▶ 1×</button>
+      <button class="btn-tiny" id="music-btn">♪</button>
+      <button class="btn-tiny" id="hint-btn" title="Show me the controller activity">●</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div id="garden-wrap">
+      <canvas id="garden-canvas" width="900" height="700"></canvas>
+      <div class="overlay-tip" id="overlay-tip"></div>
+    </div>
+
+    <aside class="clipboard">
+      <div class="clip-header">
+        <h2>Garden plan</h2>
+        <small id="clip-subtitle">~ as written on the clipboard ~</small>
+      </div>
+      <div class="goal" id="goal-card">
+        <div class="label">This chapter's goal</div>
+        <div class="text" id="goal-text">—</div>
+        <div class="progress"><div class="fill" id="goal-fill" style="width:0%"></div></div>
+      </div>
+      <div class="scroll">
+        <div id="rules-list"></div>
+        <button class="add-rule" id="add-rule-btn">＋ write a new rule</button>
+      </div>
+      <div class="bots-section">
+        <h3>Apprentices <small>· the controllers</small></h3>
+        <div class="bot-list" id="bots-list"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- Whisper bubble: the previous gardener's ghost commenting -->
+<div id="whisper" class="hidden">
+  <button class="dismiss" id="whisper-dismiss">×</button>
+  <div class="speaker">~ the old gardener whispers ~</div>
+  <div id="whisper-text"></div>
+</div>
+
+<!-- Title screen -->
+<div id="screen-title" class="screen">
+  <a href="../" class="back-link">← back to the arcade</a>
+  <div class="title-illustration">
+    <svg width="280" height="160" viewBox="0 0 280 160">
+      <ellipse cx="140" cy="142" rx="120" ry="6" fill="rgba(58,47,31,0.08)"/>
+      <!-- A little garden scene -->
+      <rect x="0" y="120" width="280" height="40" fill="#b3c285" opacity="0.5"/>
+      <!-- Tree 1 -->
+      <rect x="55" y="80" width="6" height="40" fill="#6e5236"/>
+      <ellipse cx="58" cy="74" rx="22" ry="20" fill="#5d7d3e"/>
+      <ellipse cx="68" cy="68" rx="14" ry="12" fill="#7ba35e"/>
+      <!-- Tree 2 -->
+      <rect x="125" y="68" width="8" height="52" fill="#6e5236"/>
+      <ellipse cx="129" cy="60" rx="30" ry="26" fill="#5d7d3e"/>
+      <ellipse cx="142" cy="56" rx="18" ry="14" fill="#7ba35e"/>
+      <!-- Flower bush -->
+      <ellipse cx="200" cy="115" rx="20" ry="10" fill="#94b86a"/>
+      <circle cx="195" cy="108" r="3" fill="#d68b9e"/>
+      <circle cx="205" cy="110" r="3" fill="#d68b9e"/>
+      <circle cx="200" cy="113" r="3" fill="#c75d4c"/>
+      <!-- Gardener figure (bot) -->
+      <circle cx="240" cy="100" r="6" fill="#a8784a"/>
+      <rect x="237" y="106" width="6" height="14" fill="#a8784a"/>
+      <line x1="240" y1="110" x2="248" y2="116" stroke="#a8784a" stroke-width="2" stroke-linecap="round"/>
+      <!-- Sun -->
+      <circle cx="240" cy="30" r="14" fill="#f0d4b2" opacity="0.7"/>
+      <circle cx="240" cy="30" r="9" fill="#f5d99c"/>
+    </svg>
+  </div>
+  <h1>The Gardener</h1>
+  <h2>~ a parable about letting go of the hoe ~</h2>
+  <p>
+    You've inherited an old estate. The previous head gardener has passed.
+    You are the head gardener now — but the rules of the estate are strict:
+    <em>the head gardener does not plant. The head gardener does not weed. The head gardener writes the plan.</em>
+  </p>
+  <p>
+    Apprentices carry out your written rules. Plants grow. Plants die. Storms strike. Weeds spawn.
+    The apprentices continuously check: does the garden look like the plan? If not, they act.
+  </p>
+  <p>
+    <b>You will be tempted to do things directly.</b> Resist. Once you trust the system — really trust it —
+    the garden will tend itself, and you'll see why it works the way it works.
+  </p>
+  <button id="btn-start">Begin Chapter I</button>
+  <button id="btn-load" class="ghost" style="display:none;">Continue saved game</button>
+</div>
+
+<!-- Act intro -->
+<div id="screen-act" class="screen" style="display:none;">
+  <h1 id="act-title">Chapter One</h1>
+  <h2 id="act-subtitle">— the inheritance —</h2>
+  <div class="story-card" id="act-story"></div>
+  <p id="act-goal" style="font-family: 'Cormorant Garamond', serif; font-size: 18px; color: var(--accent);"></p>
+  <button id="btn-act-continue">Walk into the garden</button>
+</div>
+
+<!-- Act-end summary -->
+<div id="screen-act-end" class="screen" style="display:none;">
+  <h1 id="act-end-title">Chapter complete</h1>
+  <h2 id="act-end-subtitle">~ the garden settles ~</h2>
+  <div class="act-stats" id="act-end-stats"></div>
+  <div class="story-card" id="act-end-lesson"></div>
+  <button id="btn-act-next">Next chapter</button>
+</div>
+
+<!-- Rule editor modal -->
+<div class="modal-bg" id="rule-editor-bg">
+  <div class="modal" id="rule-editor">
+    <h2>Write a rule <small id="rule-editor-sub">— in a careful, slow hand —</small></h2>
+    <div class="form-group">
+      <label>What kind of rule?</label>
+      <div class="rule-type-choices" id="rule-type-choices"></div>
+    </div>
+    <div class="form-group" id="rule-plant-group">
+      <label>Of what plant?</label>
+      <select id="rule-plant"></select>
+    </div>
+    <div class="form-group" id="rule-count-group">
+      <label>How many?</label>
+      <input type="number" id="rule-count" min="1" max="20" value="3"/>
+    </div>
+    <div class="form-group" id="rule-zone-group">
+      <label>In which zone?</label>
+      <div class="zone-picker" id="rule-zone"></div>
+    </div>
+    <div class="actions">
+      <button class="ghost" id="rule-cancel">Cancel</button>
+      <button class="primary" id="rule-save">Write the rule</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ═════════════════════════════════════════════════════════════════════════
+   THE GARDENER — game logic
+   ═════════════════════════════════════════════════════════════════════════ */
+
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const choice = a => a[Math.floor(Math.random() * a.length)];
+const rand = (a, b) => a + Math.random() * (b - a);
+
+/* ─── World constants ──────────────────────────────────────────────────── */
+
+const GRID_W = 14;
+const GRID_H = 10;
+let TILE_PX = 60;      // recalculated on resize
+const TICK_RATE = 60;  // animation frames per second
+const DAY_LENGTH_SEC = 30;  // seconds of real time per in-game day
+
+/* ─── Plant catalogue ─────────────────────────────────────────────────────
+   Each plant has a lifecycle: seed → sprout → young → mature → (optionally
+   producing) → aging → dead. Bots reconcile by planting seeds and removing
+   dead plants. */
+
+const PLANT_TYPES = {
+  oak: {
+    name: "oak",
+    label: "oak tree",
+    icon: "🌳",
+    maturePx: 26, sproutPx: 6,
+    growSec: 35,
+    lifeSec: 200,
+    canopy: "#5d7d3e", trunk: "#6e5236", highlight: "#7ba35e",
+    blurb: "Slow, stately, hardy.",
+  },
+  apple: {
+    name: "apple",
+    label: "apple tree",
+    icon: "🍎",
+    maturePx: 22, sproutPx: 6,
+    growSec: 25, lifeSec: 160,
+    canopy: "#7ba35e", trunk: "#6e5236", highlight: "#c75d4c",
+    produces: { every: 18, into: "fruit-apple", essence: 4 },
+    blurb: "Fruits regularly. Earns essence.",
+  },
+  herb: {
+    name: "herb",
+    label: "herb",
+    icon: "🌿",
+    maturePx: 9, sproutPx: 3,
+    growSec: 10, lifeSec: 60,
+    canopy: "#94b86a", trunk: "#6b7d4a",
+    produces: { every: 12, into: "fruit-herb", essence: 1 },
+    blurb: "Quick to grow. Modest essence.",
+  },
+  rose: {
+    name: "rose",
+    label: "rose bush",
+    icon: "🌹",
+    maturePx: 14, sproutPx: 4,
+    growSec: 18, lifeSec: 110,
+    canopy: "#94b86a", trunk: "#6b7d4a", highlight: "#d68b9e",
+    blurb: "Decorative. Attracts pollinators.",
+  },
+  rare: {
+    name: "rare",
+    label: "rare specimen",
+    icon: "✦",
+    maturePx: 28, sproutPx: 6,
+    growSec: 50, lifeSec: 300,
+    canopy: "#b8965f", trunk: "#7a5e3b", highlight: "#d4b87a",
+    blurb: "Named, ordered, immovable. The estate's crown jewels.",
+  },
+};
+
+/* ─── Rule (declarative state) ────────────────────────────────────────────
+   Five rule shapes mirror real K8s workload objects:
+     POPULATION : "N of plant X in zone Y"        → Deployment / ReplicaSet
+     ORDERED    : "named specimens, in order"     → StatefulSet
+     UNIVERSAL  : "one in every zone"             → DaemonSet
+     ONESHOT    : "harvest all ripe fruit"        → Job
+     SCHEDULED  : "water everything each dawn"    → CronJob
+*/
+
+const RULE_TYPES = {
+  POPULATION: {
+    name: "Population",
+    blurb: "I want N of this plant in this zone.",
+    k8s: "like a Deployment",
+    needsCount: true, needsZone: true, needsPlant: true,
+  },
+  ORDERED: {
+    name: "Ordered Specimens",
+    blurb: "Named specimens in a specific order. If one dies, its replacement keeps the same name and place.",
+    k8s: "like a StatefulSet",
+    needsCount: true, needsZone: true, needsPlant: true, plantWhitelist: ["rare"],
+  },
+  UNIVERSAL: {
+    name: "Universal Presence",
+    blurb: "Exactly one of this plant in every zone — always.",
+    k8s: "like a DaemonSet",
+    needsCount: false, needsZone: false, needsPlant: true,
+  },
+  ONESHOT: {
+    name: "One-Time Task",
+    blurb: "Harvest every ripe fruit in this zone, once. When done, the rule completes.",
+    k8s: "like a Job",
+    needsCount: false, needsZone: true, needsPlant: false, action: "harvest",
+  },
+  SCHEDULED: {
+    name: "Daily Routine",
+    blurb: "Water everything in this zone, every dawn.",
+    k8s: "like a CronJob",
+    needsCount: false, needsZone: true, needsPlant: false, action: "water",
+  },
+};
+
+/* ─── Zones — fenced areas of the garden ──────────────────────────────── */
+
+const ZONES = [
+  { id: "north",  name: "North Plot",     x: 1,  y: 1, w: 5, h: 4, color: "#cfd8a6" },
+  { id: "south",  name: "South Bed",      x: 1,  y: 6, w: 5, h: 3, color: "#d4c9a6" },
+  { id: "east",   name: "East Orchard",   x: 7,  y: 1, w: 6, h: 4, color: "#d6c08d" },
+  { id: "west",   name: "Sacred Grove",   x: 7,  y: 6, w: 6, h: 3, color: "#bfc99a" },
+];
+
+/* ─── Game state ─────────────────────────────────────────────────────── */
+
+const G = {
+  // Time
+  day: 1,
+  season: "spring",
+  weather: "fair",
+  tickClock: 0,        // accumulator: when reaches 1 second, advance world
+  realStartMs: 0,
+  speed: 1,            // 1, 2, or 4
+
+  // Garden
+  plants: [],          // { id, type, gx, gy, age, lifespan, state: 'sprout'|'young'|'mature'|'dead', water, fruits, named?, zone }
+  weeds: [],           // { id, gx, gy, age }
+  fruits: [],          // { id, gx, gy, type, age }   harvested = removed
+  bots: [],            // { id, kind, x, y, vx, vy, state, task, taskTarget, cooldown }
+
+  // Declarative state
+  rules: [],           // each rule: { id, kind, plantType, count, zoneId, satisfied, etc. }
+  ruleNextId: 1,
+  plantNextId: 1,
+  botNextId: 1,
+  weedNextId: 1,
+  fruitNextId: 1,
+
+  // Resources
+  essence: 0,
+
+  // Progression
+  act: 1,
+  actCompletedAt: null,
+  hintsSeen: new Set(),
+  triedToPlant: 0,     // how many times the user has clicked on the garden expecting to plant
+  unlocks: {
+    POPULATION: true,
+    ORDERED: false,
+    UNIVERSAL: false,
+    ONESHOT: false,
+    SCHEDULED: false,
+    bots: { planter: true, waterer: false, pruner: false, harvester: false, guardian: false, specialist: false },
+    plants: { oak: true, apple: true, herb: false, rose: false, rare: false },
+  },
+
+  // Stats tracked across the run
+  stats: { plantsPlanted: 0, plantsLost: 0, weedsRemoved: 0, fruitsHarvested: 0, reconciliations: 0 },
+
+  // Camera (not used yet but reserved)
+  state: "title",       // title | act-intro | playing | act-end
+  goalText: "",
+  goalProgress: 0,      // 0..1
+};
+
+/* ─── Acts (story progression) ──────────────────────────────────────────
+   The acts gate the unlocking of mechanics. Each act has:
+     - intro text (story)
+     - goal: a function returning {done, progress, text}
+     - on-start: function called when act begins
+     - on-end: function called when act ends
+   This is how we sequence the lesson. */
+
+const ACTS = [
+  // ─── Chapter I ───
+  {
+    title: "Chapter I",
+    subtitle: "— the inheritance —",
+    story:
+      "<div class=\"speaker\">~ the old gardener's note ~</div>" +
+      "<p>I leave you what I tended for forty years. There is one rule above all others:</p>" +
+      "<p style=\"font-family:'Caveat',cursive; font-size:20px; color:var(--accent); text-align:center;\">do not touch the earth with your hands.</p>" +
+      "<p>You will be tempted. The first apprentice, Brewer, will plant whatever you write on the clipboard. " +
+      "Begin small. Five oaks in the north plot, perhaps.</p>",
+    goalText: "Get 5 mature oaks alive in the North Plot.",
+    onStart() {
+      G.unlocks.POPULATION = true;
+      // Give the player a planter bot from the start
+      addBot("planter", "Brewer");
+    },
+    goal() {
+      const matureOaks = G.plants.filter(p => p.type === "oak" && p.state === "mature" && p.zone === "north").length;
+      return { done: matureOaks >= 5, progress: matureOaks / 5, text: matureOaks + " of 5 mature oaks in the north" };
+    },
+    onEnd() { showWhisper("It begins. You wrote, the garden obeyed. <em>That is the whole secret.</em>"); },
+    endLesson:
+      "<div class=\"speaker\">~ a lesson ~</div>" +
+      "You wrote one rule. The garden produced 5 trees — and will <em>keep</em> producing 5. " +
+      "If a tree dies, Brewer will plant another, indefinitely, without you. " +
+      "This is the core of every Kubernetes Deployment: <b>declared count, continuously reconciled</b>.",
+  },
+
+  // ─── Chapter II ───
+  {
+    title: "Chapter II",
+    subtitle: "— the first storm —",
+    story:
+      "<div class=\"speaker\">~ the old gardener whispers ~</div>" +
+      "<p>Storms will come. Drought will come. Plants will die.</p>" +
+      "<p>Watch — and resist the urge to do anything. You wrote a rule that said five oaks. " +
+      "If three are dead, Brewer will plant two more. You don't need to think about it.</p>" +
+      "<p>This is not lazy. This is the system working <em>without you</em>, which is the whole point.</p>",
+    goalText: "Survive a storm without losing your declared population. (Keep 5 oaks for 30 seconds after the storm.)",
+    onStart() {
+      // Schedule a storm in 8 seconds of game time
+      G._stormSchedule = G.day + 0.3;
+    },
+    goal() {
+      const matureOaks = G.plants.filter(p => p.type === "oak" && p.state === "mature" && p.zone === "north").length;
+      if (G._postStormStreakStart == null) {
+        if (G._storm_happened && matureOaks >= 5) G._postStormStreakStart = performance.now();
+        return { done: false, progress: matureOaks / 5, text: G._storm_happened ? "wait for the apprentices..." : "storm coming..." };
+      }
+      const heldSec = (performance.now() - G._postStormStreakStart) / 1000;
+      return { done: heldSec >= 30, progress: Math.min(1, heldSec / 30), text: "held for " + Math.floor(heldSec) + "/30s" };
+    },
+    onEnd() {},
+    endLesson:
+      "<div class=\"speaker\">~ a lesson ~</div>" +
+      "What you saw was a <b>control loop</b>: the apprentice noticed observed-state (3 oaks) didn't match desired-state (5), " +
+      "and acted to close the gap. The loop never stops running. " +
+      "<em>In Kubernetes, this loop is what restores a crashed pod, replaces a failed node, and keeps your service alive at 3 AM.</em>",
+  },
+
+  // ─── Chapter III ───
+  {
+    title: "Chapter III",
+    subtitle: "— the weed problem —",
+    story:
+      "<div class=\"speaker\">~ the old gardener whispers ~</div>" +
+      "<p>Weeds. They appear randomly. Brewer plants — he does not weed. You need a specialist.</p>" +
+      "<p>Write a rule: <em>one Guardian in every zone</em>. The Guardian's only job is weeds. " +
+      "It will appear in each zone you've declared, and patrol there forever.</p>",
+    goalText: "Write a UNIVERSAL rule for Guardians. Keep the garden weed-count below 3 for 45 seconds.",
+    onStart() {
+      G.unlocks.UNIVERSAL = true;
+      G.unlocks.bots.guardian = true;
+      // Start spawning weeds more aggressively
+      G._weedRate = 0.4;
+    },
+    goal() {
+      // Need a UNIVERSAL rule for guardians installed
+      const hasGuardianRule = G.rules.some(r => r.kind === "UNIVERSAL" && r.botType === "guardian");
+      if (!hasGuardianRule) return { done: false, progress: 0, text: "no guardian rule yet" };
+      if (G._weedStreakStart == null) G._weedStreakStart = performance.now();
+      const wcount = G.weeds.length;
+      if (wcount >= 3) { G._weedStreakStart = performance.now(); return { done: false, progress: 0, text: wcount + " weeds — too many" }; }
+      const heldSec = (performance.now() - G._weedStreakStart) / 1000;
+      return { done: heldSec >= 45, progress: Math.min(1, heldSec / 45), text: "weeds under control for " + Math.floor(heldSec) + "/45s" };
+    },
+    endLesson:
+      "<div class=\"speaker\">~ a lesson ~</div>" +
+      "You wrote one rule — 'one Guardian in every zone' — and got a Guardian in each. As you add zones, " +
+      "Guardians appear automatically. As you remove zones, Guardians vanish. " +
+      "This is a <b>DaemonSet</b> in Kubernetes: one pod on every node, always. The pattern is universal.",
+  },
+
+  // ─── Chapter IV ───
+  {
+    title: "Chapter IV",
+    subtitle: "— named specimens —",
+    story:
+      "<div class=\"speaker\">~ the old gardener whispers ~</div>" +
+      "<p>The Sacred Grove holds the estate's rare specimens. They have names: <em>the Oak of Margaret</em>, " +
+      "<em>the Yew of Henry</em>, <em>the Pine of Alma</em> — in that exact order.</p>" +
+      "<p>When one dies, its replacement <em>keeps the name and the place</em>. The grove does not shuffle.</p>" +
+      "<p>Write an ORDERED rule for 3 rare specimens in the west.</p>",
+    goalText: "Plant 3 ordered, named specimens in the Sacred Grove and keep them alive.",
+    onStart() {
+      G.unlocks.ORDERED = true;
+      G.unlocks.plants.rare = true;
+      G.unlocks.bots.specialist = true;
+      addBot("specialist", "Old Tobias");
+    },
+    goal() {
+      const r = G.rules.find(r => r.kind === "ORDERED" && r.plantType === "rare" && r.count >= 3);
+      if (!r) return { done: false, progress: 0, text: "no ordered rule written" };
+      const named = G.plants.filter(p => p.type === "rare" && p.named && p.state === "mature").length;
+      return { done: named >= 3, progress: named / 3, text: named + "/3 mature specimens named & grown" };
+    },
+    endLesson:
+      "<div class=\"speaker\">~ a lesson ~</div>" +
+      "These specimens have <em>identity</em>. Their replacement is not 'just any specimen' — it inherits the " +
+      "name and the plot. In Kubernetes, this is a <b>StatefulSet</b>: pods get stable network names " +
+      "(database-0, database-1, database-2) and their data follows the identity, not the pod. " +
+      "Crucial for anything that holds state.",
+  },
+
+  // ─── Chapter V ───
+  {
+    title: "Chapter V",
+    subtitle: "— harvest & ritual —",
+    story:
+      "<div class=\"speaker\">~ the old gardener whispers ~</div>" +
+      "<p>The orchard has been quiet. Now the apples are ripe. Write a one-time task: <em>harvest all ripe apples in the east</em>. " +
+      "When done, the rule completes — a stamp marks it 'finished'.</p>" +
+      "<p>And: water everything daily. The dawn brings the watering. Write a SCHEDULED rule.</p>",
+    goalText: "Use a ONESHOT and a SCHEDULED rule to manage the orchard. Reach 50 essence.",
+    onStart() {
+      G.unlocks.ONESHOT = true;
+      G.unlocks.SCHEDULED = true;
+      G.unlocks.bots.harvester = true;
+      G.unlocks.bots.waterer = true;
+      addBot("harvester", "Wren");
+      addBot("waterer", "Posy");
+      G.unlocks.plants.herb = true;
+      G.unlocks.plants.rose = true;
+    },
+    goal() {
+      return { done: G.essence >= 50, progress: Math.min(1, G.essence / 50), text: G.essence + "/50 essence" };
+    },
+    endLesson:
+      "<div class=\"speaker\">~ a lesson ~</div>" +
+      "Two new shapes of work. The Harvest is a <b>Job</b> in Kubernetes — run once, to completion, then stop. " +
+      "The Daily Watering is a <b>CronJob</b> — run on a schedule, forever. " +
+      "Together with Deployments (Population), DaemonSets (Universal), and StatefulSets (Ordered), you've now " +
+      "seen the five fundamental workload shapes Kubernetes ships with.",
+  },
+
+  // ─── Chapter VI ───
+  {
+    title: "Chapter VI",
+    subtitle: "— the royal visit —",
+    story:
+      "<div class=\"speaker\">~ the old gardener whispers ~</div>" +
+      "<p>The queen visits in seven days. The garden must be in perfect declared state: a mature, " +
+      "weed-free, well-watered estate with all five rule shapes in active service.</p>" +
+      "<p>This is your final test. Make the system <em>completely autonomous</em>. " +
+      "From now until the visit, do nothing — let the system maintain itself.</p>",
+    goalText: "Reach the royal visit (day 14) with the garden in perfect declared state. Earn 200 essence along the way.",
+    onStart() {
+      G._royalVisitDay = G.day + 7;
+      // Crank up the chaos a bit
+      G._weedRate = 0.5;
+    },
+    goal() {
+      const arrived = G.day >= G._royalVisitDay;
+      const allRuleShapes = ["POPULATION","ORDERED","UNIVERSAL","ONESHOT","SCHEDULED"].every(k => G.rules.some(r => r.kind === k));
+      const weedsOk = G.weeds.length < 5;
+      const essenceOk = G.essence >= 200;
+      let progress = 0;
+      progress += allRuleShapes ? 0.3 : 0.3 * (["POPULATION","ORDERED","UNIVERSAL","ONESHOT","SCHEDULED"].filter(k => G.rules.some(r => r.kind === k)).length / 5);
+      progress += Math.min(0.3, 0.3 * G.essence / 200);
+      progress += Math.min(0.4, 0.4 * (G.day - (G._royalVisitDay - 7)) / 7);
+      const days = Math.max(0, G._royalVisitDay - G.day).toFixed(1);
+      return {
+        done: arrived && allRuleShapes && weedsOk && essenceOk,
+        progress: Math.min(1, progress),
+        text: arrived ? (allRuleShapes && weedsOk && essenceOk ? "the queen is pleased" : "the queen is unimpressed") : `${days} days until the royal visit`,
+      };
+    },
+    endLesson:
+      "<div class=\"speaker\">~ a final lesson ~</div>" +
+      "You designed a system that runs itself. You wrote the intent; the controllers carried it. Plants died and were replaced. " +
+      "Weeds spawned and were removed. Visitors came and went, and the garden stayed.<br><br>" +
+      "<em>Kubernetes is exactly this, at scale.</em> Every Deployment, StatefulSet, DaemonSet, Job, and CronJob is a rule on a clipboard. " +
+      "Every controller is an apprentice. The kubelet on each node, the scheduler, the autoscaler — all of them, running the same loop. " +
+      "The whole platform is the loop, made very large.",
+  },
+];
+
+/* ─── Bot definitions ─────────────────────────────────────────────────── */
+
+const BOT_KINDS = {
+  planter:   { color: "#a8784a", icon: "🌱", description: "Plants seeds where rules say.",         names: ["Brewer", "Marrow", "Yew"] },
+  waterer:   { color: "#79a3a8", icon: "💧", description: "Waters dry plants.",                    names: ["Posy", "Brook", "Mist"] },
+  pruner:    { color: "#8e6f4a", icon: "✂",  description: "Removes dead plants.",                  names: ["Reed", "Hawthorn", "Sage"] },
+  harvester: { color: "#c75d4c", icon: "🍎", description: "Collects ripe fruit.",                  names: ["Wren", "Finch", "Lark"] },
+  guardian:  { color: "#6e8a4b", icon: "🛡", description: "Removes weeds in their assigned zone.", names: ["Thistle", "Bramble", "Heather"] },
+  specialist:{ color: "#b8965f", icon: "✦",  description: "Tends rare specimens by name.",         names: ["Old Tobias", "Margaret", "Henry"] },
+};
+
+function addBot(kind, name) {
+  const k = BOT_KINDS[kind];
+  if (!name) name = choice(k.names);
+  // Spawn at random tile
+  const gx = rand(1, GRID_W - 1);
+  const gy = rand(1, GRID_H - 1);
+  G.bots.push({
+    id: G.botNextId++, kind, name,
+    x: gx, y: gy, vx: 0, vy: 0,
+    targetX: gx, targetY: gy,
+    state: "idle", task: null, cooldown: 0,
+    wobble: Math.random() * Math.PI * 2,
+  });
+  return G.bots[G.bots.length - 1];
+}
+
+function removeBot(id) {
+  G.bots = G.bots.filter(b => b.id !== id);
+}
+
+/* ─── Plant lifecycle helpers ──────────────────────────────────────── */
+
+function plantSeed(type, gx, gy, opts = {}) {
+  const def = PLANT_TYPES[type];
+  if (!def) return null;
+  const zone = ZONES.find(z => gx >= z.x && gx < z.x + z.w && gy >= z.y && gy < z.y + z.h);
+  const p = {
+    id: G.plantNextId++,
+    type,
+    gx, gy,
+    age: 0,
+    lifespan: def.lifeSec * (0.85 + Math.random() * 0.3),
+    state: "sprout",
+    water: 0.6,
+    fruits: 0,
+    sinceFruit: 0,
+    named: opts.named || null,
+    order: opts.order != null ? opts.order : null,
+    zone: zone ? zone.id : null,
+    wobble: Math.random() * Math.PI * 2,
+  };
+  G.plants.push(p);
+  G.stats.plantsPlanted++;
+  return p;
+}
+
+function killPlant(p) {
+  p.state = "dead";
+  p.age = p.lifespan;
+  G.stats.plantsLost++;
+}
+
+function tileEmpty(gx, gy) {
+  return !G.plants.some(p => p.state !== "dead" && p.gx === gx && p.gy === gy)
+      && !G.weeds.some(w => w.gx === gx && w.gy === gy);
+}
+
+function tilesInZone(zoneId) {
+  const z = ZONES.find(zz => zz.id === zoneId);
+  if (!z) return [];
+  const out = [];
+  for (let y = z.y; y < z.y + z.h; y++)
+    for (let x = z.x; x < z.x + z.w; x++)
+      out.push({ x, y });
+  return out;
+}
+
+function emptyTilesInZone(zoneId) {
+  return tilesInZone(zoneId).filter(t => tileEmpty(t.x, t.y));
+}
+
+/* ─── Reconciler — the heart of the game ─────────────────────────────── */
+/*
+   The reconciler runs every ~0.5s and evaluates each rule. For each rule
+   that's "out of spec" (observed != desired), it issues tasks to idle bots.
+
+   This is what teaches the lesson. The player writes a rule; this function
+   runs forever; bots act on its decisions.
+*/
+
+let reconcileClock = 0;
+const RECONCILE_INTERVAL = 0.7;  // seconds
+
+function reconcile(dt) {
+  reconcileClock += dt;
+  if (reconcileClock < RECONCILE_INTERVAL) return;
+  reconcileClock = 0;
+
+  // Evaluate each rule, record its satisfied status, and create tasks if needed
+  for (const rule of G.rules) {
+    if (rule.kind === "POPULATION") reconcilePopulation(rule);
+    else if (rule.kind === "ORDERED") reconcileOrdered(rule);
+    else if (rule.kind === "UNIVERSAL") reconcileUniversal(rule);
+    else if (rule.kind === "ONESHOT") reconcileOneshot(rule);
+    else if (rule.kind === "SCHEDULED") reconcileScheduled(rule);
+  }
+
+  G.stats.reconciliations++;
+}
+
+function reconcilePopulation(rule) {
+  // Count alive plants of this type in this zone
+  const alive = G.plants.filter(p =>
+    p.type === rule.plantType && p.state !== "dead" && p.zone === rule.zoneId
+  );
+  rule.observed = alive.length;
+  rule.desired = rule.count;
+  rule.satisfied = alive.length >= rule.count;
+  if (alive.length >= rule.count) return;
+  // Need to plant more — issue tasks if there's space and an idle planter
+  const empties = emptyTilesInZone(rule.zoneId);
+  if (empties.length === 0) { rule.status = "pending — no empty tile"; return; }
+  const need = rule.count - alive.length;
+  const planters = G.bots.filter(b => b.kind === "planter" && b.state === "idle");
+  for (let i = 0; i < Math.min(need, planters.length, empties.length); i++) {
+    const tile = empties[Math.floor(Math.random() * empties.length)];
+    const planter = planters[i];
+    planter.task = { kind: "plant", plantType: rule.plantType, gx: tile.x, gy: tile.y, ruleId: rule.id };
+    planter.state = "moving";
+    planter.targetX = tile.x; planter.targetY = tile.y;
+    // Remove from empties to avoid double-targeting
+    empties.splice(empties.indexOf(tile), 1);
+  }
+  rule.status = need > planters.length ? `waiting for apprentices (${alive.length}/${rule.count})` : `planting... (${alive.length}/${rule.count})`;
+}
+
+function reconcileOrdered(rule) {
+  // Named specimens: name-1, name-2, ..., name-N — each in a specific tile
+  // Tile assignment: predetermined deterministic positions inside the zone
+  if (!rule.slots) {
+    const tiles = tilesInZone(rule.zoneId);
+    rule.slots = tiles.slice(0, rule.count).map((t, i) => ({
+      index: i,
+      gx: t.x, gy: t.y,
+      name: rule.plantType === "rare" ? namedSpecimen(i) : (rule.plantType + "-" + i),
+    }));
+  }
+  let satisfied = 0;
+  const planters = G.bots.filter(b => (b.kind === "planter" || b.kind === "specialist") && b.state === "idle");
+  let planterIdx = 0;
+  for (const slot of rule.slots) {
+    const occupant = G.plants.find(p => p.type === rule.plantType && p.state !== "dead" && p.named === slot.name);
+    if (occupant) { satisfied++; continue; }
+    // No occupant — plant one if a planter is idle and tile is empty
+    if (!tileEmpty(slot.gx, slot.gy)) continue;
+    if (planterIdx >= planters.length) continue;
+    const planter = planters[planterIdx++];
+    planter.task = { kind: "plant", plantType: rule.plantType, gx: slot.gx, gy: slot.gy, ruleId: rule.id, named: slot.name, order: slot.index };
+    planter.state = "moving";
+    planter.targetX = slot.gx; planter.targetY = slot.gy;
+  }
+  rule.observed = satisfied; rule.desired = rule.count;
+  rule.satisfied = satisfied === rule.count;
+  rule.status = satisfied === rule.count ? "all specimens grown" : `${satisfied}/${rule.count} named & alive`;
+}
+
+const NAMED_LIST = ["Margaret", "Henry", "Alma", "Cyril", "Beatrice", "Edmund", "Cordelia", "Phineas"];
+function namedSpecimen(i) { return NAMED_LIST[i % NAMED_LIST.length]; }
+
+function reconcileUniversal(rule) {
+  // For each zone, want one bot of `rule.botType` assigned to it.
+  rule.observed = 0;
+  rule.desired = ZONES.length;
+  for (const z of ZONES) {
+    const assigned = G.bots.find(b => b.kind === rule.botType && b.zoneAssigned === z.id);
+    if (assigned) { rule.observed++; continue; }
+    // Spawn one — but cap total
+    if (G.bots.filter(b => b.kind === rule.botType).length >= ZONES.length) continue;
+    const b = addBot(rule.botType);
+    b.zoneAssigned = z.id;
+    b.targetX = z.x + z.w / 2; b.targetY = z.y + z.h / 2;
+    rule.observed++;
+  }
+  rule.satisfied = rule.observed >= rule.desired;
+  rule.status = rule.satisfied ? "one in each zone" : `${rule.observed}/${rule.desired} zones covered`;
+}
+
+function reconcileOneshot(rule) {
+  if (rule.completed) {
+    rule.satisfied = true;
+    rule.status = "completed at day " + rule.completedDay;
+    return;
+  }
+  // Find work: ripe fruits in the zone
+  const work = G.fruits.filter(f => {
+    const z = ZONES.find(zz => f.gx >= zz.x && f.gx < zz.x + zz.w && f.gy >= zz.y && f.gy < zz.y + zz.h);
+    return z && z.id === rule.zoneId;
+  });
+  if (work.length === 0) {
+    if (rule.observed != null && rule.observed > 0) {
+      rule.completed = true; rule.completedDay = G.day.toFixed(1);
+      rule.satisfied = true; rule.status = "completed at day " + rule.completedDay;
+      return;
+    }
+    rule.observed = 0; rule.satisfied = false;
+    rule.status = "nothing to harvest yet";
+    return;
+  }
+  rule.observed = work.length;
+  // Issue tasks to harvesters
+  const harvesters = G.bots.filter(b => b.kind === "harvester" && b.state === "idle");
+  let issued = 0;
+  for (const f of work) {
+    if (issued >= harvesters.length) break;
+    const h = harvesters[issued++];
+    h.task = { kind: "harvest", fruitId: f.id, gx: f.gx, gy: f.gy, ruleId: rule.id };
+    h.state = "moving";
+    h.targetX = f.gx; h.targetY = f.gy;
+  }
+  rule.status = "harvesting (" + work.length + " left)";
+  rule.satisfied = false;
+}
+
+function reconcileScheduled(rule) {
+  // Run "every dawn" — i.e., once per day. We track lastRunDay.
+  const today = Math.floor(G.day);
+  if (rule.lastRunDay === today) {
+    rule.satisfied = true;
+    rule.status = "next run at dawn (day " + (today + 1) + ")";
+    return;
+  }
+  // Issue water tasks to all waterer bots for plants in this zone
+  const thirsty = G.plants.filter(p => {
+    if (p.state === "dead") return false;
+    if (p.water > 0.6) return false;
+    const z = ZONES.find(zz => p.gx >= zz.x && p.gx < zz.x + zz.w && p.gy >= zz.y && p.gy < zz.y + zz.h);
+    return z && z.id === rule.zoneId;
+  });
+  const waterers = G.bots.filter(b => b.kind === "waterer" && b.state === "idle");
+  let issued = 0;
+  for (const t of thirsty) {
+    if (issued >= waterers.length) break;
+    const w = waterers[issued++];
+    w.task = { kind: "water", plantId: t.id, gx: t.gx, gy: t.gy, ruleId: rule.id };
+    w.state = "moving";
+    w.targetX = t.gx; w.targetY = t.gy;
+  }
+  if (thirsty.length === 0 || waterers.length > 0) rule.lastRunDay = today;
+  rule.observed = thirsty.length;
+  rule.satisfied = thirsty.length === 0;
+  rule.status = thirsty.length === 0 ? "everything watered today" : "watering " + thirsty.length + " plants";
+}
+
+/* ─── Bot AI tick ──────────────────────────────────────────────────────── */
+
+function tickBots(dt) {
+  for (const b of G.bots) {
+    b.wobble += dt * 2;
+    if (b.state === "idle") {
+      // Lazy wander — for visual life
+      if (Math.random() < 0.02) {
+        b.targetX = clamp(b.x + rand(-2, 2), 0.5, GRID_W - 0.5);
+        b.targetY = clamp(b.y + rand(-2, 2), 0.5, GRID_H - 0.5);
+        if (b.zoneAssigned) {
+          const z = ZONES.find(zz => zz.id === b.zoneAssigned);
+          if (z) { b.targetX = z.x + Math.random() * z.w; b.targetY = z.y + Math.random() * z.h; }
+        }
+      }
+      // Universal-rule bots: hunt weeds in their zone autonomously
+      if (b.kind === "guardian" && b.zoneAssigned) {
+        const weed = G.weeds.find(w => {
+          const z = ZONES.find(zz => zz.id === b.zoneAssigned);
+          return z && w.gx >= z.x && w.gx < z.x + z.w && w.gy >= z.y && w.gy < z.y + z.h;
+        });
+        if (weed) {
+          b.task = { kind: "weed", weedId: weed.id, gx: weed.gx, gy: weed.gy };
+          b.state = "moving";
+          b.targetX = weed.gx; b.targetY = weed.gy;
+        }
+      }
+      // Pruner: roam looking for dead plants
+      if (b.kind === "pruner") {
+        const dead = G.plants.find(p => p.state === "dead");
+        if (dead) {
+          b.task = { kind: "prune", plantId: dead.id, gx: dead.gx, gy: dead.gy };
+          b.state = "moving";
+          b.targetX = dead.gx; b.targetY = dead.gy;
+        }
+      }
+    }
+    // Move toward target
+    const dx = b.targetX - b.x, dy = b.targetY - b.y;
+    const d = Math.hypot(dx, dy);
+    const speed = 2.0;
+    if (d > 0.1) {
+      b.x += (dx / d) * speed * dt;
+      b.y += (dy / d) * speed * dt;
+    } else if (b.state === "moving" && b.task) {
+      // Arrived — execute task
+      executeTask(b);
+    }
+  }
+}
+
+function executeTask(b) {
+  const t = b.task;
+  if (!t) { b.state = "idle"; return; }
+  if (t.kind === "plant") {
+    if (tileEmpty(t.gx, t.gy)) {
+      plantSeed(t.plantType, t.gx, t.gy, { named: t.named, order: t.order });
+    }
+  } else if (t.kind === "water") {
+    const p = G.plants.find(pp => pp.id === t.plantId);
+    if (p) p.water = 1.0;
+  } else if (t.kind === "weed") {
+    G.weeds = G.weeds.filter(w => w.id !== t.weedId);
+    G.stats.weedsRemoved++;
+  } else if (t.kind === "prune") {
+    G.plants = G.plants.filter(p => p.id !== t.plantId);
+  } else if (t.kind === "harvest") {
+    const f = G.fruits.find(ff => ff.id === t.fruitId);
+    if (f) {
+      // Determine fruit-type essence value
+      const ftype = f.type.replace("fruit-", "");
+      const def = PLANT_TYPES[ftype];
+      const essence = (def && def.produces && def.produces.essence) || 2;
+      G.essence += essence;
+      G.fruits = G.fruits.filter(ff => ff.id !== t.fruitId);
+      G.stats.fruitsHarvested++;
+    }
+  }
+  b.task = null; b.state = "idle"; b.cooldown = 0.5;
+}
+
+/* ─── World tick — time, plants, weeds, weather ──────────────────────── */
+
+function tickWorld(dt) {
+  G.tickClock += dt * G.speed;
+  // Day progression — DAY_LENGTH_SEC of real time = 1 in-game day
+  G.day += dt * G.speed / DAY_LENGTH_SEC;
+
+  // Plants
+  for (const p of G.plants) {
+    p.wobble += dt;
+    if (p.state === "dead") continue;
+    p.age += dt * G.speed;
+    const def = PLANT_TYPES[p.type];
+    if (p.state === "sprout" && p.age > def.growSec * 0.3) p.state = "young";
+    if (p.state === "young" && p.age > def.growSec) p.state = "mature";
+    // Water drains
+    p.water = Math.max(0, p.water - dt * G.speed * 0.01);
+    // Drought kills slowly
+    if (p.water < 0.1) p.age += dt * G.speed * 0.5;
+    // Lifespan
+    if (p.age > p.lifespan) killPlant(p);
+    // Fruit production
+    if (p.state === "mature" && def.produces) {
+      p.sinceFruit += dt * G.speed;
+      if (p.sinceFruit > def.produces.every && Math.random() < 0.5) {
+        spawnFruit(p);
+        p.sinceFruit = 0;
+      }
+    }
+  }
+
+  // Weeds spawn
+  if (Math.random() < (G._weedRate || 0.1) * dt * G.speed) {
+    const gx = Math.floor(rand(0, GRID_W));
+    const gy = Math.floor(rand(0, GRID_H));
+    if (tileEmpty(gx, gy)) {
+      G.weeds.push({ id: G.weedNextId++, gx, gy, age: 0, wobble: Math.random() * 6.28 });
+    }
+  }
+  for (const w of G.weeds) w.age += dt * G.speed;
+
+  // Storms
+  if (G._stormSchedule && G.day >= G._stormSchedule && !G._storm_active) {
+    triggerStorm();
+  }
+  if (G._storm_active) {
+    G._storm_elapsed += dt;
+    if (G._storm_elapsed > 4) { G._storm_active = false; G._storm_happened = true; }
+  }
+}
+
+function spawnFruit(p) {
+  // Find nearby empty-ish spot
+  G.fruits.push({
+    id: G.fruitNextId++,
+    type: "fruit-" + p.type,
+    gx: p.gx, gy: p.gy + 0.5,
+    age: 0,
+    parent: p.id,
+    wobble: Math.random() * 6.28,
+  });
+}
+
+function triggerStorm() {
+  G._storm_active = true;
+  G._storm_elapsed = 0;
+  G.weather = "storm";
+  // Kill ~30% of plants in a random zone
+  const z = choice(ZONES);
+  const plantsInZ = G.plants.filter(p => p.state !== "dead" && p.zone === z.id);
+  const toKill = Math.ceil(plantsInZ.length * 0.4);
+  for (let i = 0; i < toKill && plantsInZ.length > 0; i++) {
+    const v = plantsInZ.splice(Math.floor(Math.random() * plantsInZ.length), 1)[0];
+    killPlant(v);
+  }
+  showWhisper("A storm tore through the " + z.name + ". <em>Watch what happens next — without doing anything.</em>");
+  // Restore weather after a bit
+  setTimeout(() => { G.weather = "fair"; }, 5000);
+}
+
+/* ─── Whisper system (the old gardener's hints) ────────────────────── */
+
+function showWhisper(text, key) {
+  if (key && G.hintsSeen.has(key)) return;
+  if (key) G.hintsSeen.add(key);
+  $("#whisper-text").innerHTML = text;
+  $("#whisper").classList.remove("hidden");
+  setTimeout(() => $("#whisper").classList.add("hidden"), 12000);
+}
+$("#whisper-dismiss").addEventListener("click", () => $("#whisper").classList.add("hidden"));
+
+/* ─── Canvas rendering ────────────────────────────────────────────────── */
+
+const canvas = $("#garden-canvas");
+const ctx = canvas.getContext("2d");
+
+function resizeCanvas() {
+  const wrap = $("#garden-wrap");
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  canvas.width = w * window.devicePixelRatio;
+  canvas.height = h * window.devicePixelRatio;
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+  TILE_PX = Math.min(w / GRID_W, h / GRID_H);
+}
+window.addEventListener("resize", resizeCanvas);
+
+function render() {
+  const w = canvas.width / window.devicePixelRatio;
+  const h = canvas.height / window.devicePixelRatio;
+  // Sky band (top ~30% of canvas) shifts with time of day and weather
+  const tod = timeOfDayColors();
+  const stormy = G.weather === "storm" || G._storm_active;
+  const skyTop = stormy ? "#4a5365" : tod.top;
+  const skyBot = stormy ? "#6c7384" : tod.bot;
+  const sky = ctx.createLinearGradient(0, 0, 0, h * 0.45);
+  sky.addColorStop(0, skyTop);
+  sky.addColorStop(1, skyBot);
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, h * 0.45);
+  // Ground band — season-tinted, slightly darkened at night
+  const tint = seasonGroundTint();
+  const grad = ctx.createLinearGradient(0, h * 0.2, 0, h);
+  grad.addColorStop(0, tint[0]);
+  grad.addColorStop(0.55, tint[1]);
+  grad.addColorStop(1, tint[2]);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, h * 0.2, w, h * 0.8);
+  // Night/dusk darkness wash
+  if (tod.light < 0.95 && !stormy) {
+    ctx.fillStyle = `rgba(20, 24, 45, ${(1 - tod.light) * 0.32})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Offset to center grid
+  const totalW = GRID_W * TILE_PX, totalH = GRID_H * TILE_PX;
+  const offX = (w - totalW) / 2, offY = (h - totalH) / 2;
+
+  // Zone backgrounds (parchment-tinted plots)
+  for (const z of ZONES) {
+    const zx = offX + z.x * TILE_PX, zy = offY + z.y * TILE_PX;
+    const zw = z.w * TILE_PX, zh = z.h * TILE_PX;
+    ctx.fillStyle = z.color;
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(zx, zy, zw, zh);
+    ctx.globalAlpha = 1;
+    // Stitched-fence border
+    ctx.strokeStyle = "rgba(110, 82, 54, 0.6)";
+    ctx.setLineDash([6, 5]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(zx + 2, zy + 2, zw - 4, zh - 4);
+    ctx.setLineDash([]);
+    // Zone label
+    ctx.fillStyle = "rgba(58, 47, 31, 0.6)";
+    ctx.font = "italic 13px 'Lora', serif";
+    ctx.fillText(z.name, zx + 8, zy + 18);
+  }
+
+  // Grid lines (very subtle)
+  ctx.strokeStyle = "rgba(58, 47, 31, 0.06)";
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= GRID_W; x++) {
+    ctx.beginPath();
+    ctx.moveTo(offX + x * TILE_PX, offY);
+    ctx.lineTo(offX + x * TILE_PX, offY + totalH);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= GRID_H; y++) {
+    ctx.beginPath();
+    ctx.moveTo(offX, offY + y * TILE_PX);
+    ctx.lineTo(offX + totalW, offY + y * TILE_PX);
+    ctx.stroke();
+  }
+
+  // Weeds (drawn first, behind plants)
+  for (const wd of G.weeds) drawWeed(offX + wd.gx * TILE_PX + TILE_PX/2, offY + wd.gy * TILE_PX + TILE_PX/2, wd);
+
+  // Plants (sorted by Y so taller back-row appears behind front)
+  const sortedPlants = G.plants.slice().sort((a, b) => a.gy - b.gy);
+  for (const p of sortedPlants) {
+    drawPlant(offX + p.gx * TILE_PX + TILE_PX/2, offY + p.gy * TILE_PX + TILE_PX*0.85, p);
+  }
+
+  // Fruits (small bobbing dots)
+  for (const f of G.fruits) drawFruit(offX + f.gx * TILE_PX + TILE_PX/2, offY + f.gy * TILE_PX + TILE_PX*0.55, f);
+
+  // Bots (drawn on top so they're always visible)
+  for (const b of G.bots) drawBot(offX + b.x * TILE_PX + TILE_PX/2, offY + b.y * TILE_PX + TILE_PX*0.85, b);
+
+  // Storm overlay
+  if (G._storm_active) {
+    ctx.fillStyle = "rgba(80, 92, 112, 0.35)";
+    ctx.fillRect(0, 0, w, h);
+    // Rain streaks
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 60; i++) {
+      const sx = (Math.random() * w + performance.now() * 0.3) % w;
+      const sy = (Math.random() * h + performance.now() * 0.5) % h;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx - 4, sy + 12);
+      ctx.stroke();
+    }
+    // Occasional lightning flash
+    if (Math.random() < 0.008) {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+  // Particles (petals / dust / leaves / snow) — drawn on top of everything
+  Particles.draw(ctx);
+}
+
+function drawPlant(cx, cy, p) {
+  const def = PLANT_TYPES[p.type];
+  let size = def.sproutPx;
+  if (p.state === "young") size = lerp(def.sproutPx, def.maturePx, 0.5);
+  else if (p.state === "mature") size = def.maturePx;
+  else if (p.state === "dead") size = def.maturePx * 0.7;
+
+  const sway = Math.sin(p.wobble * 1.5) * 1.5;
+  const baseY = cy;
+  // Trunk
+  const trunkH = size * 0.4;
+  ctx.fillStyle = p.state === "dead" ? "#8a7960" : def.trunk;
+  ctx.fillRect(cx - 2 + sway*0.3, baseY - trunkH, 4, trunkH);
+  // Canopy
+  if (p.state !== "dead") {
+    ctx.fillStyle = def.canopy;
+    ctx.beginPath();
+    ctx.ellipse(cx + sway, baseY - trunkH - size * 0.3, size * 0.9, size * 0.85, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Highlight
+    if (def.highlight) {
+      ctx.fillStyle = def.highlight;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.ellipse(cx + sway + size * 0.15, baseY - trunkH - size * 0.45, size * 0.4, size * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  } else {
+    // Dead — brown branches
+    ctx.strokeStyle = "#8a7960";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, baseY - trunkH);
+    ctx.lineTo(cx - size * 0.4, baseY - trunkH - size * 0.5);
+    ctx.moveTo(cx, baseY - trunkH);
+    ctx.lineTo(cx + size * 0.4, baseY - trunkH - size * 0.5);
+    ctx.stroke();
+  }
+  // Water indicator if dry
+  if (p.state !== "dead" && p.water < 0.3) {
+    ctx.fillStyle = "#c69466";
+    ctx.font = "11px serif";
+    ctx.fillText("✱", cx + size * 0.6, baseY - trunkH);
+  }
+  // Named indicator
+  if (p.named) {
+    ctx.fillStyle = "rgba(58, 47, 31, 0.7)";
+    ctx.font = "italic 10px 'Lora', serif";
+    ctx.textAlign = "center";
+    ctx.fillText(p.named, cx, baseY + 12);
+    ctx.textAlign = "left";
+  }
+}
+
+function drawWeed(cx, cy, w) {
+  const sway = Math.sin(w.wobble + performance.now() * 0.003) * 2;
+  ctx.fillStyle = "#a3623d";
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + w.wobble * 0.3;
+    const r = 7;
+    const ex = cx + Math.cos(a) * 4 + sway;
+    const ey = cy + Math.sin(a) * 3;
+    ctx.beginPath();
+    ctx.ellipse(ex, ey, 2, 7, a, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawFruit(cx, cy, f) {
+  const bob = Math.sin(f.wobble + performance.now() * 0.005) * 2;
+  ctx.fillStyle = f.type === "fruit-apple" ? "#c75d4c" : "#94b86a";
+  ctx.beginPath();
+  ctx.arc(cx, cy + bob, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawBot(cx, cy, b) {
+  const k = BOT_KINDS[b.kind];
+  const bob = Math.sin(b.wobble * 4) * 1.5;
+  // Shadow
+  ctx.fillStyle = "rgba(58, 47, 31, 0.18)";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 4, 7, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Body
+  ctx.fillStyle = k.color;
+  ctx.fillRect(cx - 4, cy - 10 + bob, 8, 10);
+  // Head
+  ctx.beginPath();
+  ctx.arc(cx, cy - 13 + bob, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+  // Walking line under (small foot)
+  ctx.fillStyle = "rgba(58, 47, 31, 0.4)";
+  ctx.fillRect(cx - 3, cy + bob, 6, 1.5);
+  // Hat / icon on top
+  if (b.kind === "guardian") {
+    ctx.fillStyle = "#3d3527";
+    ctx.beginPath();
+    ctx.moveTo(cx - 5, cy - 16 + bob);
+    ctx.lineTo(cx + 5, cy - 16 + bob);
+    ctx.lineTo(cx, cy - 21 + bob);
+    ctx.fill();
+  }
+  if (b.kind === "specialist") {
+    ctx.fillStyle = "#b8965f";
+    ctx.beginPath();
+    ctx.moveTo(cx - 5, cy - 17 + bob);
+    ctx.lineTo(cx + 5, cy - 17 + bob);
+    ctx.lineTo(cx + 4, cy - 20 + bob);
+    ctx.lineTo(cx, cy - 23 + bob);
+    ctx.lineTo(cx - 4, cy - 20 + bob);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Name tag (faint)
+  ctx.fillStyle = "rgba(58, 47, 31, 0.55)";
+  ctx.font = "10px 'Lora', serif";
+  ctx.textAlign = "center";
+  ctx.fillText(b.name, cx, cy + 14);
+  ctx.textAlign = "left";
+}
+
+/* ─── Click handler ───────────────────────────────────────────────────── */
+
+canvas.addEventListener("click", (e) => {
+  G.triedToPlant++;
+  if (G.triedToPlant === 1) {
+    showWhisper("You cannot plant by hand. <em>Write a rule on the clipboard instead.</em>", "first-touch");
+  } else if (G.triedToPlant === 2) {
+    showWhisper("Still no. The clipboard is to your right — that's how the garden listens.", "second-touch");
+  } else if (G.triedToPlant >= 3 && G.triedToPlant <= 5) {
+    showWhisper("(Resist. Trust the system. This is the lesson.)", "third-touch-" + G.triedToPlant);
+  }
+});
+
+
+/* ═════════════════════════════════════════════════════════════════════════
+   PASTORAL MUSIC ENGINE
+   Soft procedural music that fits the mood:
+     - Title:    sparse "morning bells" — single piano-tone notes drifting in
+     - Playing:  layered woodwind drone + slow modal arpeggio + sparse melody
+     - Storm:    everything down a third, switches to Aeolian, low cello drone
+     - Act-end:  resolves to the tonic with a slow chord
+   Designed to be BORING in the best sense — not catchy, not loopy enough to
+   notice, the auditory equivalent of light through a window.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+const Music = (() => {
+  let ctx = null;
+  let master = null;
+  let on = false;
+  let muted = false;
+  let mood = "title";        // title | calm | storm | resolve
+  let stepMs = 250;          // base subdivision (eighth note at ~60bpm)
+  let bar = 0;               // counter for arrangement
+  let loopHandle = null;
+
+  // F mixolydian for warm pastoral feel; A aeolian when stormy
+  const SCALE_PLAYING = [349.23, 392.00, 440.00, 466.16, 523.25, 587.33, 622.25, 698.46]; // F G A Bb C D Eb F
+  const SCALE_STORM   = [220.00, 246.94, 261.63, 293.66, 329.63, 349.23, 392.00, 440.00]; // A B C D E F G A
+  const SCALE_TITLE   = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25]; // C major pentatonic-ish
+
+  function ensureCtx() {
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain();
+    master.gain.value = 0;
+    master.connect(ctx.destination);
+    // Very slow fade-in on first start
+    master.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 1.2);
+  }
+
+  // Soft tone (additive: sine fundamental + quiet overtones, like flute/recorder)
+  function pluck(freq, when, dur, vol = 0.18, character = "flute") {
+    if (!ctx) return;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, when);
+    out.gain.exponentialRampToValueAtTime(vol, when + 0.04);
+    out.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    out.connect(master);
+
+    if (character === "flute") {
+      // Sine fundamental + a quieter sine 2x for breathiness
+      const o1 = ctx.createOscillator(); o1.type = "sine"; o1.frequency.value = freq;
+      const o2 = ctx.createOscillator(); o2.type = "triangle"; o2.frequency.value = freq * 2;
+      const g2 = ctx.createGain(); g2.gain.value = 0.18;
+      o1.connect(out); o2.connect(g2); g2.connect(out);
+      // Gentle vibrato
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 5;
+      const lfoG = ctx.createGain(); lfoG.gain.value = freq * 0.005;
+      lfo.connect(lfoG); lfoG.connect(o1.frequency); lfoG.connect(o2.frequency);
+      o1.start(when); o2.start(when); lfo.start(when);
+      o1.stop(when + dur + 0.05); o2.stop(when + dur + 0.05); lfo.stop(when + dur + 0.05);
+    } else if (character === "bell") {
+      // Bright bell-like — sine with shorter decay and 3x overtone
+      const o1 = ctx.createOscillator(); o1.type = "sine"; o1.frequency.value = freq;
+      const o2 = ctx.createOscillator(); o2.type = "sine"; o2.frequency.value = freq * 3;
+      const g2 = ctx.createGain(); g2.gain.value = 0.08;
+      o1.connect(out); o2.connect(g2); g2.connect(out);
+      o1.start(when); o2.start(when);
+      o1.stop(when + dur + 0.05); o2.stop(when + dur + 0.05);
+    } else if (character === "cello") {
+      // Sawtooth filtered low — for storm bass drone
+      const o1 = ctx.createOscillator(); o1.type = "sawtooth"; o1.frequency.value = freq;
+      const filter = ctx.createBiquadFilter(); filter.type = "lowpass";
+      filter.frequency.value = 600; filter.Q.value = 1.2;
+      o1.connect(filter); filter.connect(out);
+      o1.start(when);
+      o1.stop(when + dur + 0.05);
+    } else if (character === "pluck") {
+      // Soft attack triangle for arpeggios
+      const o1 = ctx.createOscillator(); o1.type = "triangle"; o1.frequency.value = freq;
+      o1.connect(out);
+      o1.start(when); o1.stop(when + dur + 0.05);
+    }
+  }
+
+  function tick() {
+    if (!on || !ctx) return;
+    const now = ctx.currentTime;
+    bar++;
+    const scale = mood === "storm" ? SCALE_STORM : mood === "title" ? SCALE_TITLE : SCALE_PLAYING;
+
+    if (mood === "title") {
+      // Sparse bell drift — one note every 2 bars, sometimes a soft chord
+      if (bar % 2 === 0) {
+        const f = scale[Math.floor(Math.random() * scale.length)];
+        pluck(f, now + 0.05, 3.5, 0.12, "bell");
+        if (Math.random() < 0.35) pluck(scale[0] / 2, now + 0.05, 3.5, 0.08, "flute");
+      }
+    } else if (mood === "calm") {
+      // 4-bar slow arpeggio over a held drone
+      const beat = bar % 16;
+      // Bass drone (long, every 16 beats)
+      if (beat === 0) {
+        pluck(scale[0] / 2, now, 8.0, 0.10, "flute");
+        pluck(scale[2] / 2, now, 8.0, 0.07, "flute");  // fifth
+      }
+      // Slow arpeggio
+      if (beat % 2 === 0) {
+        const pattern = [0, 2, 4, 5, 4, 2, 4, 0]; // gentle rise-fall
+        const noteIdx = pattern[(beat / 2) % pattern.length];
+        pluck(scale[noteIdx], now + 0.05, 1.4, 0.10, "pluck");
+      }
+      // Sparse melody — every 8 beats, only sometimes
+      if (beat === 4 && Math.random() < 0.5) {
+        const f = scale[3 + Math.floor(Math.random() * 4)];
+        pluck(f, now + 0.05, 2.8, 0.14, "flute");
+      }
+      if (beat === 12 && Math.random() < 0.3) {
+        const f = scale[Math.floor(Math.random() * scale.length)];
+        pluck(f, now + 0.05, 2.2, 0.12, "flute");
+      }
+    } else if (mood === "storm") {
+      // Low cello drone + minor arpeggio
+      const beat = bar % 8;
+      if (beat === 0) {
+        pluck(scale[0] / 2, now, 4.5, 0.13, "cello");
+      }
+      if (beat % 2 === 0) {
+        const pattern = [0, 2, 4, 2];
+        const f = scale[pattern[(beat / 2) % pattern.length]];
+        pluck(f, now + 0.05, 0.9, 0.08, "pluck");
+      }
+    } else if (mood === "resolve") {
+      // A slow major chord every 4 bars
+      if (bar % 4 === 0) {
+        pluck(scale[0], now, 4.0, 0.13, "flute");
+        pluck(scale[2], now, 4.0, 0.10, "flute");
+        pluck(scale[4], now, 4.0, 0.09, "flute");
+        pluck(scale[0] / 2, now, 4.0, 0.08, "cello");
+      }
+    }
+  }
+
+  function start() {
+    if (on) return;
+    ensureCtx();
+    if (ctx.state === "suspended") ctx.resume();
+    on = true;
+    muted = false;
+    if (master) {
+      master.gain.cancelScheduledValues(ctx.currentTime);
+      master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
+      master.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 1.0);
+    }
+    if (loopHandle) clearInterval(loopHandle);
+    loopHandle = setInterval(tick, stepMs);
+  }
+
+  function stop() {
+    on = false;
+    if (loopHandle) { clearInterval(loopHandle); loopHandle = null; }
+    if (master && ctx) {
+      master.gain.cancelScheduledValues(ctx.currentTime);
+      master.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
+    }
+  }
+
+  function toggle() {
+    if (on) { stop(); muted = true; }
+    else    { start(); muted = false; }
+    return !muted;
+  }
+
+  function setMood(m) {
+    if (mood === m) return;
+    mood = m;
+    bar = 0; // reset arrangement counter
+  }
+
+  return { start, stop, toggle, setMood, isPlaying: () => on, isMuted: () => muted };
+})();
+
+/* ─── Save / Load ────────────────────────────────────────────────────────
+   Players come back to gardens. Persist enough state that re-opening the
+   tab restores you to the same act, same plants, same rules.
+   The reconciler is deterministic given state + RNG, but we don't restore
+   RNG — that's fine, weeds and storms re-roll, which is in keeping with
+   the theme (the garden lived while you were away).
+   ──────────────────────────────────────────────────────────────────────── */
+
+const SAVE_KEY = "gardener-save-v1";
+const SAVE_INTERVAL_SEC = 8;
+let _lastSaveAt = 0;
+
+function saveGame() {
+  try {
+    const data = {
+      day: G.day, season: G.season, weather: G.weather,
+      plants: G.plants, weeds: G.weeds, fruits: G.fruits, bots: G.bots,
+      rules: G.rules.map(r => ({
+        id: r.id, kind: r.kind, plantType: r.plantType, count: r.count,
+        zoneId: r.zoneId, satisfied: r.satisfied,
+        scheduleEveryDays: r.scheduleEveryDays, scheduleNextDay: r.scheduleNextDay,
+        oneShotDone: r.oneShotDone, namedList: r.namedList,
+      })),
+      ruleNextId: G.ruleNextId, plantNextId: G.plantNextId, botNextId: G.botNextId,
+      weedNextId: G.weedNextId, fruitNextId: G.fruitNextId,
+      essence: G.essence, act: G.act,
+      hintsSeen: Array.from(G.hintsSeen),
+      triedToPlant: G.triedToPlant,
+      unlocks: {
+        POPULATION: G.unlocks.POPULATION, ORDERED: G.unlocks.ORDERED,
+        UNIVERSAL: G.unlocks.UNIVERSAL, ONESHOT: G.unlocks.ONESHOT,
+        SCHEDULED: G.unlocks.SCHEDULED,
+        bots: { ...G.unlocks.bots }, plants: { ...G.unlocks.plants },
+      },
+      stats: { ...G.stats },
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    return true;
+  } catch (e) {
+    console.warn("Save failed:", e);
+    return false;
+  }
+}
+
+function hasSave() {
+  try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; }
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    G.day = d.day; G.season = d.season; G.weather = d.weather;
+    G.plants = d.plants || []; G.weeds = d.weeds || [];
+    G.fruits = d.fruits || []; G.bots = d.bots || [];
+    G.rules = d.rules || [];
+    G.ruleNextId = d.ruleNextId || 1; G.plantNextId = d.plantNextId || 1;
+    G.botNextId = d.botNextId || 1; G.weedNextId = d.weedNextId || 1;
+    G.fruitNextId = d.fruitNextId || 1;
+    G.essence = d.essence || 0; G.act = d.act || 1;
+    G.hintsSeen = new Set(d.hintsSeen || []);
+    G.triedToPlant = d.triedToPlant || 0;
+    if (d.unlocks) {
+      G.unlocks.POPULATION = d.unlocks.POPULATION;
+      G.unlocks.ORDERED = d.unlocks.ORDERED;
+      G.unlocks.UNIVERSAL = d.unlocks.UNIVERSAL;
+      G.unlocks.ONESHOT = d.unlocks.ONESHOT;
+      G.unlocks.SCHEDULED = d.unlocks.SCHEDULED;
+      if (d.unlocks.bots) Object.assign(G.unlocks.bots, d.unlocks.bots);
+      if (d.unlocks.plants) Object.assign(G.unlocks.plants, d.unlocks.plants);
+    }
+    if (d.stats) Object.assign(G.stats, d.stats);
+    return true;
+  } catch (e) {
+    console.warn("Load failed:", e);
+    return false;
+  }
+}
+
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch {}
+}
+
+/* ─── Visual particles (season-driven ambience) ──────────────────────────
+   A small particle system seeded by season:
+     spring → drifting cherry-blossom petals
+     summer → dust motes in sun
+     autumn → falling leaves
+     winter → snow
+   Cheap to update; capped at 40 simultaneous particles. */
+
+const Particles = (() => {
+  const list = [];
+  const MAX = 40;
+  function spawn(w, h, season) {
+    if (list.length >= MAX) return;
+    const p = { x: Math.random() * w, y: -10, vx: 0, vy: 0,
+                sz: 0, life: 0, maxLife: 0, color: "#fff", kind: season };
+    if (season === "spring") {
+      p.vx = -0.15 + Math.random() * 0.3; p.vy = 0.25 + Math.random() * 0.25;
+      p.sz = 3 + Math.random() * 2; p.maxLife = 18 + Math.random() * 8;
+      p.color = Math.random() < 0.5 ? "#f0c8d4" : "#f8d4d4";
+    } else if (season === "summer") {
+      p.x = Math.random() * w; p.y = Math.random() * h;
+      p.vx = (Math.random() - 0.5) * 0.1; p.vy = (Math.random() - 0.5) * 0.05;
+      p.sz = 1.5 + Math.random() * 1.2; p.maxLife = 10 + Math.random() * 8;
+      p.color = "rgba(255, 240, 200, 0.5)";
+    } else if (season === "autumn") {
+      p.vx = -0.3 + Math.random() * 0.6; p.vy = 0.4 + Math.random() * 0.4;
+      p.sz = 3 + Math.random() * 3; p.maxLife = 14 + Math.random() * 8;
+      p.color = ["#c97942", "#d49a4a", "#b85e34", "#a3552c"][Math.floor(Math.random() * 4)];
+    } else if (season === "winter") {
+      p.vx = -0.2 + Math.random() * 0.4; p.vy = 0.3 + Math.random() * 0.4;
+      p.sz = 1.5 + Math.random() * 2; p.maxLife = 20 + Math.random() * 8;
+      p.color = "rgba(248, 248, 255, 0.85)";
+    }
+    list.push(p);
+  }
+  function update(dt, w, h, season) {
+    // Spawn rate varies per season
+    const rate = season === "winter" ? 1.2 : season === "autumn" ? 0.9 :
+                 season === "spring" ? 0.6 : 0.3;
+    if (Math.random() < rate * dt * 8) spawn(w, h, season);
+    for (let i = list.length - 1; i >= 0; i--) {
+      const p = list[i];
+      p.x += p.vx * dt * 60; p.y += p.vy * dt * 60;
+      p.life += dt;
+      if (p.life > p.maxLife || p.y > h + 20 || p.x < -20 || p.x > w + 20) {
+        list.splice(i, 1);
+      }
+    }
+  }
+  function draw(ctx) {
+    for (const p of list) {
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.min(1, (p.maxLife - p.life) / 3);
+      if (p.kind === "spring" || p.kind === "autumn") {
+        // Petals — small ovals
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, p.sz * 0.6, p.sz, p.life * 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.sz, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+  function clear() { list.length = 0; }
+  return { update, draw, clear };
+})();
+
+/* ─── Day/night sky helper ─────────────────────────────────────────────── */
+function timeOfDayColors() {
+  // G.day is fractional. 0.0–0.25 = dawn, 0.25–0.7 = day, 0.7–0.85 = dusk, else night
+  const frac = G.day % 1;
+  // Phase t (0..1) along day cycle
+  let top, bot, light;
+  if (frac < 0.15) {       // pre-dawn
+    top = "#5e6783"; bot = "#a89272"; light = 0.55;
+  } else if (frac < 0.30) { // dawn
+    const k = (frac - 0.15) / 0.15;
+    top = lerpColor("#5e6783", "#cee0e8", k);
+    bot = lerpColor("#a89272", "#e8c89c", k);
+    light = 0.55 + 0.35 * k;
+  } else if (frac < 0.70) { // day
+    top = "#cee0e8"; bot = "#e8d5a6"; light = 1.0;
+  } else if (frac < 0.85) { // dusk
+    const k = (frac - 0.70) / 0.15;
+    top = lerpColor("#cee0e8", "#7b6f88", k);
+    bot = lerpColor("#e8d5a6", "#c47c5b", k);
+    light = 1.0 - 0.45 * k;
+  } else {                  // night
+    top = "#2b3450"; bot = "#3d3858"; light = 0.45;
+  }
+  return { top, bot, light };
+}
+function lerpColor(a, b, t) {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
+  const br = (pb >> 16) & 255, bg = (pb >> 8) & 255, bb = pb & 255;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return "#" + ((r << 16) | (g << 8) | bl).toString(16).padStart(6, "0");
+}
+function seasonGroundTint() {
+  if (G.season === "winter") return ["#d4dbd0", "#bcc5b9", "#9faa9a"];
+  if (G.season === "autumn") return ["#c9bb83", "#bca564", "#a08e4a"];
+  if (G.season === "summer") return ["#c4d29e", "#a9bc7d", "#8aa663"];
+  return ["#cadc9e", "#a9bf78", "#88a662"]; // spring default
+}
+
+
+/* ─── Game loop ──────────────────────────────────────────────────────── */
+
+let lastFrame = 0;
+let _stop = false;
+function loop(ts) {
+  if (_stop) return;
+  if (!lastFrame) lastFrame = ts;
+  const dt = Math.min(0.05, (ts - lastFrame) / 1000);
+  lastFrame = ts;
+  if (G.state === "playing") {
+    tickWorld(dt);
+    tickBots(dt);
+    reconcile(dt);
+    // Goal check
+    const act = ACTS[G.act - 1];
+    if (act && act.goal) {
+      const r = act.goal();
+      G.goalProgress = r.progress;
+      $("#goal-fill").style.width = (r.progress * 100) + "%";
+      $("#goal-text").textContent = act.goalText + (r.text ? " — " + r.text : "");
+      if (r.done && !G.actCompletedAt) {
+        G.actCompletedAt = performance.now();
+        setTimeout(() => endAct(), 1500);
+      }
+    }
+    updateStatus();
+    updateRulesUI();
+    updateBotsUI();
+    // Music mood follows weather
+    Music.setMood(G._storm_active ? "storm" : "calm");
+    // Save every SAVE_INTERVAL_SEC seconds
+    if (performance.now() - _lastSaveAt > SAVE_INTERVAL_SEC * 1000) {
+      _lastSaveAt = performance.now();
+      saveGame();
+    }
+  }
+  // Particles update regardless of paused state (light ambient motion is fine)
+  const cw = canvas.width / window.devicePixelRatio;
+  const ch = canvas.height / window.devicePixelRatio;
+  Particles.update(dt, cw, ch, G.season || "spring");
+  render();
+  requestAnimationFrame(loop);
+}
+
+function updateStatus() {
+  $("#status-day").textContent = G.day.toFixed(1);
+  $("#status-season").textContent = G.season;
+  $("#status-weather").textContent = G.weather === "storm" ? "⛈ storm" : "☀ fair";
+  $("#status-essence").textContent = String(G.essence);
+}
+
+function updateRulesUI() {
+  const list = $("#rules-list");
+  list.innerHTML = "";
+  for (const r of G.rules) {
+    const div = document.createElement("div");
+    const status = r.satisfied ? "satisfied" : (r.observed === 0 ? "pending" : "pending");
+    div.className = "rule " + status;
+    const icon = r.satisfied ? "<span class='rule-icon ok'>✓</span>" : "<span class='rule-icon warn'>...</span>";
+    div.innerHTML = ruleSummary(r) + icon +
+      "<button class='delete' title='Erase this rule' data-id='" + r.id + "'>×</button>";
+    list.appendChild(div);
+  }
+  list.querySelectorAll(".delete").forEach(b => {
+    b.addEventListener("click", e => {
+      e.stopPropagation();
+      const id = parseInt(b.dataset.id, 10);
+      G.rules = G.rules.filter(r => r.id !== id);
+    });
+  });
+}
+
+function ruleSummary(r) {
+  const rtype = RULE_TYPES[r.kind];
+  const typeName = rtype.name;
+  const k8s = rtype.k8s;
+  let spec = "";
+  if (r.kind === "POPULATION") spec = `${r.count} ${PLANT_TYPES[r.plantType].label}${r.count !== 1 ? "s" : ""} in the ${zoneName(r.zoneId)}.`;
+  else if (r.kind === "ORDERED") spec = `${r.count} named ${PLANT_TYPES[r.plantType].label}s, in order, in the ${zoneName(r.zoneId)}.`;
+  else if (r.kind === "UNIVERSAL") spec = `One ${r.botType} in every zone — always.`;
+  else if (r.kind === "ONESHOT") spec = `Harvest every ripe fruit in the ${zoneName(r.zoneId)}, once.`;
+  else if (r.kind === "SCHEDULED") spec = `Water everything in the ${zoneName(r.zoneId)}, every dawn.`;
+  return `<span class="rule-type">${typeName} <em style="color:var(--muted);font-size:9px;">· ${k8s}</em></span>
+          <span class="rule-spec">${spec}</span>
+          <span class="rule-status">${r.status || "..."}</span>`;
+}
+
+function zoneName(id) { const z = ZONES.find(z => z.id === id); return z ? z.name : "?"; }
+
+function updateBotsUI() {
+  const list = $("#bots-list");
+  list.innerHTML = "";
+  for (const b of G.bots) {
+    const k = BOT_KINDS[b.kind];
+    const div = document.createElement("div");
+    div.className = "bot " + b.state;
+    div.title = k.description;
+    div.innerHTML = `<span class="bot-icon">${k.icon}</span>${b.name}`;
+    list.appendChild(div);
+  }
+  if (G.bots.length === 0) {
+    list.innerHTML = "<small style='color:var(--muted);'>no apprentices yet</small>";
+  }
+}
+
+/* ─── Rule editor modal ─────────────────────────────────────────────── */
+
+let _editorState = null;
+function openRuleEditor() {
+  // Build the type choices
+  const choices = $("#rule-type-choices");
+  choices.innerHTML = "";
+  for (const [key, rt] of Object.entries(RULE_TYPES)) {
+    if (!G.unlocks[key]) continue;
+    const div = document.createElement("div");
+    div.className = "choice";
+    div.dataset.kind = key;
+    div.innerHTML = `<div class="name">${rt.name}</div>
+                     <div class="desc">${rt.blurb}</div>
+                     <div class="k8s">${rt.k8s}</div>`;
+    div.addEventListener("click", () => {
+      choices.querySelectorAll(".choice").forEach(c => c.classList.remove("selected"));
+      div.classList.add("selected");
+      _editorState.kind = key;
+      refreshEditorFields();
+    });
+    choices.appendChild(div);
+  }
+  // Plant choices
+  const plantSel = $("#rule-plant");
+  plantSel.innerHTML = "";
+  for (const [key, def] of Object.entries(PLANT_TYPES)) {
+    if (!G.unlocks.plants[key]) continue;
+    const opt = document.createElement("option");
+    opt.value = key; opt.textContent = def.label;
+    plantSel.appendChild(opt);
+  }
+  // Zone choices
+  const zonePicker = $("#rule-zone");
+  zonePicker.innerHTML = "";
+  for (const z of ZONES) {
+    const b = document.createElement("div");
+    b.className = "zone-btn";
+    b.dataset.zoneId = z.id;
+    b.textContent = z.name;
+    b.addEventListener("click", () => {
+      zonePicker.querySelectorAll(".zone-btn").forEach(zz => zz.classList.remove("selected"));
+      b.classList.add("selected");
+      _editorState.zoneId = z.id;
+    });
+    zonePicker.appendChild(b);
+  }
+  _editorState = { kind: null, plantType: null, count: 3, zoneId: null, botType: null };
+  refreshEditorFields();
+  $("#rule-editor-bg").classList.add("visible");
+}
+
+function refreshEditorFields() {
+  const rt = _editorState.kind ? RULE_TYPES[_editorState.kind] : null;
+  $("#rule-plant-group").style.display = (rt && rt.needsPlant && _editorState.kind !== "UNIVERSAL") ? "" : "none";
+  $("#rule-count-group").style.display = (rt && rt.needsCount) ? "" : "none";
+  $("#rule-zone-group").style.display = (rt && rt.needsZone) ? "" : "none";
+  // Filter plant choices for ORDERED rule
+  if (rt && rt.plantWhitelist) {
+    const sel = $("#rule-plant");
+    [...sel.options].forEach(o => { o.style.display = rt.plantWhitelist.includes(o.value) ? "" : "none"; });
+    if (sel.options.length > 0 && rt.plantWhitelist.includes(sel.value) === false) {
+      const okOpt = [...sel.options].find(o => rt.plantWhitelist.includes(o.value));
+      if (okOpt) sel.value = okOpt.value;
+    }
+  } else if (rt) {
+    [...$("#rule-plant").options].forEach(o => o.style.display = "");
+  }
+}
+
+$("#add-rule-btn").addEventListener("click", openRuleEditor);
+$("#rule-cancel").addEventListener("click", () => $("#rule-editor-bg").classList.remove("visible"));
+$("#rule-save").addEventListener("click", () => {
+  const kind = _editorState.kind;
+  if (!kind) { alert("Pick a rule type."); return; }
+  const rt = RULE_TYPES[kind];
+  const rule = { id: G.ruleNextId++, kind, status: "...", satisfied: false };
+  if (rt.needsPlant) rule.plantType = $("#rule-plant").value;
+  if (rt.needsCount) rule.count = parseInt($("#rule-count").value, 10) || 1;
+  if (rt.needsZone) rule.zoneId = _editorState.zoneId;
+  if (rt.needsZone && !rule.zoneId) { alert("Pick a zone."); return; }
+  if (kind === "UNIVERSAL") rule.botType = "guardian";  // for now Guardian is the only universal bot type
+  if (kind === "SCHEDULED") rule.lastRunDay = -1;
+  G.rules.push(rule);
+  $("#rule-editor-bg").classList.remove("visible");
+  showWhisper("A new rule is written. The apprentices will see it within seconds.", "first-rule-written");
+});
+
+/* ─── Act lifecycle ──────────────────────────────────────────────────── */
+
+function startGame() {
+  $("#screen-title").style.display = "none";
+  G.state = "act-intro";
+  // Start the music on user gesture (audiocontext autoplay rules)
+  if (!Music.isMuted()) Music.start();
+  Music.setMood("calm");
+  startAct(1);
+}
+
+function continueGame() {
+  if (!loadGame()) { startGame(); return; }
+  $("#screen-title").style.display = "none";
+  if (!Music.isMuted()) Music.start();
+  Music.setMood(G._storm_active ? "storm" : "calm");
+  // Re-trigger the act intro if no plants/rules exist (probably mid-act 1)
+  // Otherwise drop straight into playing
+  if (G.plants.length === 0 && G.rules.length === 0) {
+    startAct(G.act);
+  } else {
+    G.state = "playing";
+    // Re-apply act onStart logic without showing the intro
+    const act = ACTS[G.act - 1];
+    if (act) {
+      G.goalText = act.goalText;
+      // We deliberately do NOT call act.onStart() — it can over-grant bots/unlocks
+    }
+  }
+}
+
+function startAct(n) {
+  G.act = n;
+  G.actCompletedAt = null;
+  delete G._storm_happened;
+  delete G._stormSchedule;
+  delete G._storm_active;
+  delete G._weedStreakStart;
+  delete G._postStormStreakStart;
+  const act = ACTS[n - 1];
+  if (!act) { gameComplete(); return; }
+  $("#act-title").textContent = act.title;
+  $("#act-subtitle").textContent = act.subtitle;
+  $("#act-story").innerHTML = act.story;
+  $("#act-goal").innerHTML = "Goal: " + act.goalText;
+  $("#screen-act").style.display = "flex";
+  $("#btn-act-continue").onclick = () => {
+    $("#screen-act").style.display = "none";
+    G.state = "playing";
+    G.goalText = act.goalText;
+    if (act.onStart) act.onStart();
+  };
+}
+
+function endAct() {
+  const act = ACTS[G.act - 1];
+  G.state = "act-end";
+  $("#act-end-title").textContent = act.title + " complete";
+  $("#act-end-subtitle").textContent = "~ the garden settles ~";
+  $("#act-end-stats").innerHTML = `
+    <span>plants planted</span><span>${G.stats.plantsPlanted}</span>
+    <span>plants lost (natural)</span><span>${G.stats.plantsLost}</span>
+    <span>weeds removed</span><span>${G.stats.weedsRemoved}</span>
+    <span>fruits harvested</span><span>${G.stats.fruitsHarvested}</span>
+    <span>reconciliations</span><span>${G.stats.reconciliations}</span>
+    <span>essence</span><span>${G.essence}</span>
+  `;
+  $("#act-end-lesson").innerHTML = act.endLesson;
+  if (act.onEnd) act.onEnd();
+  $("#screen-act-end").style.display = "flex";
+  Music.setMood("resolve");
+  // Save on act completion too
+  saveGame();
+  $("#btn-act-next").onclick = () => {
+    $("#screen-act-end").style.display = "none";
+    Music.setMood("calm");
+    startAct(G.act + 1);
+  };
+}
+
+function gameComplete() {
+  $("#screen-act-end").style.display = "flex";
+  $("#act-end-title").textContent = "The Royal Visit";
+  $("#act-end-subtitle").textContent = "~ the queen is pleased ~";
+  $("#act-end-lesson").innerHTML =
+    "<div class='speaker'>~ the queen leaves a note ~</div>" +
+    "Your garden is a marvel. Not because of any single tree, but because no one stands over it. The system tends itself. " +
+    "<em>I would hire your apprentices.</em>";
+  $("#btn-act-next").textContent = "Begin again";
+  Music.setMood("resolve");
+  clearSave(); // Fresh garden for next playthrough
+  $("#btn-act-next").onclick = () => { location.reload(); };
+}
+
+/* ─── Title / wiring ─────────────────────────────────────────────────── */
+
+$("#btn-start").addEventListener("click", () => {
+  // Wipe any prior save when explicitly starting a new game
+  clearSave();
+  // Reset state to defaults in case player previously played
+  G.plants = []; G.weeds = []; G.fruits = []; G.bots = []; G.rules = [];
+  G.essence = 0; G.act = 1; G.day = 1; G.season = "spring"; G.weather = "fair";
+  G.hintsSeen = new Set(); G.triedToPlant = 0;
+  G.unlocks.ORDERED = false; G.unlocks.UNIVERSAL = false;
+  G.unlocks.ONESHOT = false; G.unlocks.SCHEDULED = false;
+  G.unlocks.bots = { planter: true, waterer: false, pruner: false, harvester: false, guardian: false, specialist: false };
+  G.unlocks.plants = { oak: true, apple: true, herb: false, rose: false, rare: false };
+  G.stats = { plantsPlanted: 0, plantsLost: 0, weedsRemoved: 0, fruitsHarvested: 0, reconciliations: 0 };
+  startGame();
+});
+
+$("#btn-load")?.addEventListener("click", continueGame);
+
+$("#speed-btn").addEventListener("click", () => {
+  G.speed = G.speed === 1 ? 2 : G.speed === 2 ? 4 : 1;
+  $("#speed-btn").textContent = "▶ " + G.speed + "×";
+});
+
+$("#music-btn").addEventListener("click", () => {
+  const playing = Music.toggle();
+  $("#music-btn").textContent = playing ? "♪" : "♪̸";
+  $("#music-btn").classList.toggle("active", playing);
+});
+
+// Start title music (very sparse bells) only after first user interaction
+// to comply with audiocontext autoplay rules. We'll start on any click.
+let _titleMusicStarted = false;
+document.addEventListener("click", () => {
+  if (_titleMusicStarted || G.state !== "title") return;
+  _titleMusicStarted = true;
+  Music.setMood("title");
+  Music.start();
+  $("#music-btn").classList.add("active");
+}, { once: false });
+
+// Show the Continue button if there's a saved game
+if (hasSave()) {
+  const btnLoad = $("#btn-load");
+  if (btnLoad) btnLoad.style.display = "inline-block";
+}
+
+// Save on tab close
+window.addEventListener("beforeunload", () => {
+  if (G.state === "playing") saveGame();
+});
+
+/* ─── Initialization ─────────────────────────────────────────────────── */
+
+// Mark some zones for clarity on the page from the start
+resizeCanvas();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

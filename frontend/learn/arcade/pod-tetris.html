@@ -826,6 +826,119 @@ header.top .stat.combo .val.chain-7 { font-size: 42px; color: #ff6b3a; text-shad
 #settings-drawer .now-playing b { color: var(--gold-warm); font-family: "Lora", serif; font-weight: 600; font-style: italic; }
 
 
+
+/* ─── "What is Kubernetes" intro ──────────────────────────────────────── */
+.intro-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+  max-width: 760px; margin: 24px 0;
+}
+.intro-card {
+  background: var(--bg-mid); border: 1px solid var(--line);
+  border-radius: 10px; padding: 22px 20px; text-align: left;
+}
+.intro-card .icon { font-size: 28px; margin-bottom: 8px; }
+.intro-card h3 {
+  font-family: "Cinzel", serif; font-size: 16px; letter-spacing: 0.04em;
+  color: var(--gold-warm); margin-bottom: 8px;
+}
+.intro-card p { font-size: 14px; line-height: 1.55; color: var(--honey); opacity: 0.9; margin: 0; }
+.intro-mini-diagram {
+  display: flex; gap: 6px; margin-top: 14px; padding: 10px;
+  background: var(--bg-deep); border-radius: 6px; justify-content: center;
+}
+.intro-mini-diagram .node {
+  background: var(--bg-mid); border: 1px solid var(--line);
+  padding: 6px 10px; border-radius: 4px; font-size: 11px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.intro-mini-diagram .pod {
+  height: 8px; border-radius: 2px;
+}
+.intro-mini-diagram .pod.orange { background: #e07b3a; width: 30px; }
+.intro-mini-diagram .pod.cyan   { background: #5fb3c4; width: 22px; }
+.intro-mini-diagram .pod.red    { background: #c45a4e; width: 28px; }
+
+/* ─── Post-victory tour screen ───────────────────────────────────────── */
+.tour-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+  max-width: 760px; margin: 16px 0 28px;
+}
+.tour-card {
+  background: var(--bg-mid); border: 1px solid var(--line);
+  border-radius: 8px; padding: 14px; text-align: left;
+}
+.tour-card .icon { font-size: 22px; margin-bottom: 4px; display: block; }
+.tour-card .name {
+  font-family: "Cinzel", serif; font-size: 13px; letter-spacing: 0.04em;
+  color: var(--gold-warm); margin-bottom: 4px;
+}
+.tour-card .desc { font-size: 12px; line-height: 1.45; color: var(--honey); opacity: 0.85; }
+.tour-card.played { border-color: var(--green); background: rgba(74, 157, 106, 0.08); }
+.tour-card.played::after { content: "✓ in this game"; position: absolute; }
+.tour-card { position: relative; }
+.tour-card.played::before {
+  content: "✓"; position: absolute; top: 8px; right: 10px;
+  color: var(--green); font-weight: 600;
+}
+
+/* ─── Lesson card "Learn more" link ─────────────────────────────────── */
+.lesson-card a.docs-link {
+  display: inline-block; margin-top: 12px;
+  font-family: "JetBrains Mono", monospace; font-size: 12px;
+  color: var(--cyan); text-decoration: none;
+  border-bottom: 1px dashed var(--cyan); padding-bottom: 1px;
+}
+.lesson-card a.docs-link:hover { color: var(--gold-warm); border-color: var(--gold-warm); }
+
+/* ─── YAML inspector ──────────────────────────────────────────────────── */
+#yaml-panel {
+  position: fixed; right: 0; top: 60px; bottom: 60px;
+  width: 460px; max-width: 90vw;
+  background: var(--bg-deep); border-left: 1px solid var(--gold);
+  padding: 18px 22px; overflow-y: auto; z-index: 80;
+  font-family: "JetBrains Mono", monospace; font-size: 12px; line-height: 1.55;
+  transform: translateX(100%); transition: transform 0.3s ease-out;
+  box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+}
+#yaml-panel.visible { transform: translateX(0); }
+#yaml-panel header {
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 12px;
+}
+#yaml-panel h3 {
+  font-family: "Cinzel", serif; font-size: 14px; color: var(--gold-warm);
+  letter-spacing: 0.08em; margin: 0;
+}
+#yaml-panel .close-btn {
+  background: transparent; border: 1px solid var(--line); color: var(--muted);
+  padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 14px;
+  font-family: inherit;
+}
+#yaml-panel .close-btn:hover { color: var(--honey); border-color: var(--gold); }
+#yaml-panel .yaml-doc {
+  background: rgba(0,0,0,0.25); border: 1px solid var(--line);
+  border-radius: 6px; padding: 12px 14px; margin-bottom: 14px;
+  white-space: pre-wrap; word-break: break-word;
+  color: var(--honey);
+}
+#yaml-panel .yaml-doc .key { color: var(--cyan); }
+#yaml-panel .yaml-doc .str { color: var(--gold-warm); }
+#yaml-panel .yaml-doc .num { color: var(--green); }
+#yaml-panel .yaml-doc .com { color: var(--muted); font-style: italic; }
+#yaml-panel .blurb { color: var(--muted); font-family: "Inter", sans-serif;
+                    font-size: 13px; line-height: 1.6; margin-bottom: 12px; }
+
+/* Rolling update visual indicator */
+.pod-card.rolling-v2 {
+  border-color: var(--cyan) !important;
+  border-style: dashed;
+}
+.pod-card.rolling-v2 .row-top::after {
+  content: "→ replaces v1"; font-size: 9px; color: var(--cyan);
+  font-family: "JetBrains Mono", monospace; margin-left: 4px;
+}
+
+
 @media (max-width: 900px) {
   main { grid-template-columns: 130px 1fr 130px; gap: 12px; }
   header.top .stats { gap: 12px; }
@@ -843,6 +956,7 @@ header.top .stat.combo .val.chain-7 { font-size: 42px; color: #ff6b3a; text-shad
       <span class="logo" style="margin-left: 14px;">POD TETRIS <small>· pack the cluster</small></span>
     </div>
     <div class="settings">
+      <button class="btn" id="yaml-btn" title="Show this cluster as Kubernetes YAML">{ } YAML</button>
       <button class="btn" id="music-btn" title="Music on/off">♪</button>
       <button class="btn" id="sfx-btn"   title="SFX on/off">⚲</button>
       <button class="btn" id="settings-btn" title="Settings">⚙</button>
@@ -918,6 +1032,9 @@ header.top .stat.combo .val.chain-7 { font-size: 42px; color: #ff6b3a; text-shad
   </div>
   <button id="btn-start">Begin Wave 1</button>
   <div class="best" id="best-display"></div>
+  <div style="margin-top: 10px;">
+    <button class="ghost" id="btn-practice-rolling" style="display:none; font-size: 13px; padding: 8px 16px;">★ Practice: Rolling Update</button>
+  </div>
   <div class="achievements-block">
     <h4>Achievements</h4>
     <div class="achievements-list" id="achievements-list"></div>
@@ -931,6 +1048,129 @@ header.top .stat.combo .val.chain-7 { font-size: 42px; color: #ff6b3a; text-shad
   <div class="run-stats" id="wave-stats"></div>
   <div class="lesson-card" id="wave-lesson"></div>
   <button id="btn-next-wave">Begin next wave →</button>
+</div>
+
+
+<!-- "What is Kubernetes?" intro (shown once on first run) -->
+<div id="screen-intro" class="screen" style="display:none;">
+  <a href="../" class="back-link">← back</a>
+  <h1 style="font-size: 38px;">WHAT IS KUBERNETES?</h1>
+  <h2>60 seconds of context, then the game.</h2>
+  <p style="max-width: 640px;">
+    Kubernetes is the system that runs modern apps on many computers reliably.
+    Companies like Netflix, Spotify, your bank, and your government all use it. It does
+    <b>many</b> things — networking, storage, secrets, deployments, monitoring.
+    Today you'll play just <em>one</em> of them: <b>the scheduler</b>.
+  </p>
+  <div class="intro-grid">
+    <div class="intro-card">
+      <div class="icon">📦</div>
+      <h3>Pods are workloads</h3>
+      <p>An app gets packaged into a "pod." Each pod asks for some CPU and some memory. In real K8s, a pod runs containers — for our purposes, it's just a thing that needs space.</p>
+    </div>
+    <div class="intro-card">
+      <div class="icon">🖥</div>
+      <h3>Nodes are machines</h3>
+      <p>A "node" is a physical (or virtual) computer. It has finite CPU and memory. You arrange pods onto nodes — that's scheduling.</p>
+      <div class="intro-mini-diagram">
+        <div class="node">node-1<div class="pod orange"></div><div class="pod cyan"></div></div>
+        <div class="node">node-2<div class="pod red"></div></div>
+      </div>
+    </div>
+    <div class="intro-card">
+      <div class="icon">⚖</div>
+      <h3>Constraints make it interesting</h3>
+      <p>Replicas of the same service shouldn't share a node (anti-affinity). GPU workloads need GPU nodes (taints). Databases can't move (stateful). The game teaches each constraint by making you handle it.</p>
+    </div>
+    <div class="intro-card">
+      <div class="icon">🤔</div>
+      <h3>You're the scheduler</h3>
+      <p>In real K8s, an algorithm does this 1000s of times per second. Here, <em>you</em> do it. The mental model you build is the same one the algorithm uses.</p>
+    </div>
+  </div>
+  <p style="font-size: 13px; color: var(--muted); max-width: 580px; margin-top: 4px;">
+    What you <em>won't</em> see in this game: the rest of Kubernetes (networking, storage, deploys, the control plane).
+    After Wave 10 we'll show you what was outside the scope.
+  </p>
+  <button id="btn-intro-continue" style="margin-top: 14px;">Begin Wave 1</button>
+  <button class="ghost" id="btn-intro-skip" style="margin-top: 14px;">Skip intro (forever)</button>
+</div>
+
+<!-- Post-victory: "What you didn't see" tour -->
+<div id="screen-tour" class="screen" style="display:none;">
+  <h1 style="font-size: 36px; color: var(--gold-warm);">THE REST OF KUBERNETES</h1>
+  <h2>You played the scheduler. Here's what else lives inside.</h2>
+  <p style="max-width: 600px;">
+    The game taught you bin packing, anti-affinity, taints, stateful workloads, priority + preemption,
+    pod affinity, and the cluster autoscaler. Those are real concepts you'll see in production.
+    Here's the bigger map — the organs you didn't touch.
+  </p>
+  <div class="tour-grid">
+    <div class="tour-card played">
+      <span class="icon">⚙</span>
+      <div class="name">Scheduler</div>
+      <div class="desc">Which node does each pod go on? You just played 30 minutes of it.</div>
+    </div>
+    <div class="tour-card">
+      <span class="icon">🔄</span>
+      <div class="name">Control Loop</div>
+      <div class="desc">Kubernetes constantly compares "desired state" to "observed state" and reconciles. The game was turn-based; reality is continuous.</div>
+    </div>
+    <div class="tour-card">
+      <span class="icon">🌐</span>
+      <div class="name">Services + Ingress</div>
+      <div class="desc">How traffic finds your pods, even as they're killed and replaced. Stable DNS names in front of changing pod IPs.</div>
+    </div>
+    <div class="tour-card">
+      <span class="icon">📋</span>
+      <div class="name">Deployments + ReplicaSets</div>
+      <div class="desc">You don't usually create pods directly. You declare "I want 3 of these," and the controller maintains it.</div>
+    </div>
+    <div class="tour-card">
+      <span class="icon">📦</span>
+      <div class="name">Containers + Images</div>
+      <div class="desc">A pod runs one or more containers, each from a Docker image. The game treated pods as primitive; they actually have layers underneath.</div>
+    </div>
+    <div class="tour-card">
+      <span class="icon">💾</span>
+      <div class="name">Persistent Volumes</div>
+      <div class="desc">Where stateful pods actually keep their data. You felt the "can't move" symptom; PVCs are the underlying mechanic.</div>
+    </div>
+    <div class="tour-card">
+      <span class="icon">🩺</span>
+      <div class="name">Health Probes</div>
+      <div class="desc">Liveness + readiness checks — Kubernetes asks pods "are you alive? are you ready?" continuously. <a href="pod-defender.html" style="color: var(--gold-warm);">→ Play Pod Defender for this</a></div>
+    </div>
+    <div class="tour-card">
+      <span class="icon">🚀</span>
+      <div class="name">Rolling Updates</div>
+      <div class="desc">Swap v1 pods for v2 without dropping traffic. <a href="#" id="link-rolling" style="color: var(--gold-warm);">→ Try the practice mode</a></div>
+    </div>
+    <div class="tour-card">
+      <span class="icon">🔐</span>
+      <div class="name">RBAC + Secrets</div>
+      <div class="desc">Who can do what to which resources. Plus secret/credential management via ConfigMaps and Secrets objects.</div>
+    </div>
+  </div>
+  <p style="max-width: 600px; color: var(--muted); font-size: 13px;">
+    A working mental model of all of these is what makes someone a Kubernetes engineer.
+    The scheduler is one organ. You've now touched it. The rest is one project, one outage, one weekend at a time.
+  </p>
+  <button id="btn-tour-back-to-victory">Back to victory screen</button>
+</div>
+
+<!-- YAML inspector panel -->
+<div id="yaml-panel">
+  <header>
+    <h3>YAML View</h3>
+    <button class="close-btn" id="yaml-close">×</button>
+  </header>
+  <div class="blurb">
+    This is what your current cluster would look like as Kubernetes YAML. Every pod
+    placement you make becomes one of these manifests. <em>This is the actual format
+    used in production.</em>
+  </div>
+  <div id="yaml-content"></div>
 </div>
 
 <!-- Boon selection between waves -->
@@ -959,7 +1199,10 @@ header.top .stat.combo .val.chain-7 { font-size: 42px; color: #ff6b3a; text-shad
   <div class="run-stats" id="victory-stats"></div>
   <div class="lesson-card" id="victory-lesson"></div>
   <div style="margin-top: 16px;">
-    <button id="btn-continue-endless">Continue → Endless mode</button>
+    <button id="btn-show-tour">★ See what you didn't learn</button>
+  </div>
+  <div style="margin-top: 10px;">
+    <button id="btn-continue-endless" class="ghost">Continue → Endless mode</button>
     <button class="ghost" id="btn-victory-replay">Play again from Wave 1</button>
   </div>
   <a href="../" class="back-link">← back to arcade</a>
@@ -1216,16 +1459,16 @@ const WAVES = [
 
 /* Wave-clear lesson cards */
 const WAVE_LESSONS = [
-  "<strong>Lesson · bin packing</strong><br>What you just did, the Kubernetes scheduler does. Every second. Across thousands of pods. The general problem is NP-complete — the scheduler uses smart heuristics, but it can't always be optimal. That's why <em>requests</em> matter: they're how YOU tell the scheduler what each pod actually needs.",
-  "<strong>Lesson · anti-affinity</strong><br>Two replicas of the same service on one node = a single bad node kills both. The <code>podAntiAffinity</code> rule says 'don't co-locate these'. In production, you'll see <code>topologyKey: kubernetes.io/hostname</code> for node-level spread, or <code>topology.kubernetes.io/zone</code> for AZ-level. The lesson: <em>diversity buys you survivability</em>.",
-  "<strong>Lesson · taints and tolerations</strong><br>Taints are a node's way of saying 'I'm picky — don't put just any pod here.' Tolerations are a pod's way of saying 'I accept your terms.' GPUs are the classic case (don't waste expensive hardware on web pods) but the pattern also covers spot/preemptible nodes, dedicated tenancy, hardware quirks.",
-  "<strong>Lesson · stateful workloads</strong><br>A stateful pod's data lives on a specific persistent volume attached to a specific node (or zone). You CAN'T just move it — the data wouldn't follow. This is why databases are scheduled with <code>StatefulSet</code> + PVC, not <code>Deployment</code>: the framework knows not to play musical chairs with your data.",
-  "<strong>Lesson · priority and preemption</strong><br>When critical work can't fit, Kubernetes can evict less-critical work to make room. Set with <code>priorityClassName</code>. Use cautiously: preemption is disruption. The right answer is usually 'have more capacity,' but for the case where a true emergency arrives, preemption is the release valve.",
-  "<strong>Lesson · pod affinity (positive)</strong><br>The flip side of anti-affinity. Sometimes you WANT pods together — a service and its cache, for low-latency lookups. <code>podAffinity</code> says 'co-locate'. You felt the +60 bonus when a pair landed together. The same rule in production drops cross-node hops, which drops latency, which drops your p99 tail. <br><br>And: the Autoscaler bailout button you've been using? That's a real K8s feature too. When pods can't fit, the cluster autoscaler conjures a new node. Use sparingly — every node costs money.",
-  "<strong>Lesson · resource requests vs limits</strong><br>The capacity numbers in this game are <em>requests</em> — the scheduler's allocation. In real K8s, there's a SECOND number: <em>limits</em>, the max a pod is allowed to actually use. The gap between request and limit is the overcommit budget — too little, you waste capacity; too much, you risk OOM-kills under spike load.",
-  "<strong>Lesson · cluster topology</strong><br>What you packed into a 5-node cluster looks tight at this scale. Production clusters can have hundreds or thousands of nodes — and they ALSO span availability zones and regions. <code>topologySpreadConstraints</code> extend the anti-affinity idea across whole datacenters. Same trick, bigger scale.",
-  "<strong>Lesson · cluster autoscaling</strong><br>When the scheduler can't fit a pending pod, the cluster autoscaler adds a node. When utilization drops below a threshold for long enough, it removes nodes. Combined with HPA (pod count) and VPA (pod size), you get a system that grows and shrinks against load without humans in the loop.",
-  "<strong>Lesson · this IS the scheduler</strong><br>You just played the actual algorithm. The real K8s scheduler scores each pod-on-node candidate using filters (must satisfy all the constraints you saw) and scorers (prefer balanced packing, prefer co-location of certain workloads, prefer pre-warmed images, etc). Every line of work is a published heuristic. None of it is magic.",
+  "<strong>Lesson · bin packing</strong><br>What you just did, the Kubernetes scheduler does. Every second. Across thousands of pods. The general problem is NP-complete — the scheduler uses smart heuristics, but it can't always be optimal. That's why <em>requests</em> matter: they're how YOU tell the scheduler what each pod actually needs.<br><a class='docs-link' target='_blank' href='https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/'>📖 kube-scheduler docs →</a>",
+  "<strong>Lesson · anti-affinity</strong><br>Two replicas of the same service on one node = a single bad node kills both. The <code>podAntiAffinity</code> rule says 'don't co-locate these'. In production, you'll see <code>topologyKey: kubernetes.io/hostname</code> for node-level spread, or <code>topology.kubernetes.io/zone</code> for AZ-level. The lesson: <em>diversity buys you survivability</em>.<br><a class='docs-link' target='_blank' href='https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity'>📖 affinity docs →</a>",
+  "<strong>Lesson · taints and tolerations</strong><br>Taints are a node's way of saying 'I'm picky — don't put just any pod here.' Tolerations are a pod's way of saying 'I accept your terms.' GPUs are the classic case (don't waste expensive hardware on web pods) but the pattern also covers spot/preemptible nodes, dedicated tenancy, hardware quirks.<br><a class='docs-link' target='_blank' href='https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/'>📖 taint and toleration docs →</a>",
+  "<strong>Lesson · stateful workloads</strong><br>A stateful pod's data lives on a specific persistent volume attached to a specific node (or zone). You CAN'T just move it — the data wouldn't follow. This is why databases are scheduled with <code>StatefulSet</code> + PVC, not <code>Deployment</code>: the framework knows not to play musical chairs with your data.<br><a class='docs-link' target='_blank' href='https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/'>📖 StatefulSet docs →</a>",
+  "<strong>Lesson · priority and preemption</strong><br>When critical work can't fit, Kubernetes can evict less-critical work to make room. Set with <code>priorityClassName</code>. Use cautiously: preemption is disruption. The right answer is usually 'have more capacity,' but for the case where a true emergency arrives, preemption is the release valve.<br><a class='docs-link' target='_blank' href='https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/'>📖 priority + preemption docs →</a>",
+  "<strong>Lesson · pod affinity (positive)</strong><br>The flip side of anti-affinity. Sometimes you WANT pods together — a service and its cache, for low-latency lookups. <code>podAffinity</code> says 'co-locate'. You felt the bonus when a pair landed together. The same rule in production drops cross-node hops, which drops latency, which drops your p99 tail.<br><a class='docs-link' target='_blank' href='https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity'>📖 pod affinity docs →</a>",
+  "<strong>Lesson · resource requests vs limits</strong><br>The capacity numbers in this game are <em>requests</em> — the scheduler's allocation. In real K8s, there's a SECOND number: <em>limits</em>, the max a pod is allowed to actually use. The gap between request and limit is the overcommit budget — too little, you waste capacity; too much, you risk OOM-kills under spike load.<br><a class='docs-link' target='_blank' href='https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'>📖 resource management docs →</a>",
+  "<strong>Lesson · cluster topology</strong><br>What you packed into a 5-node cluster looks tight at this scale. Production clusters can have hundreds or thousands of nodes — and they ALSO span availability zones and regions. <code>topologySpreadConstraints</code> extend the anti-affinity idea across whole datacenters. Same trick, bigger scale.<br><a class='docs-link' target='_blank' href='https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/'>📖 topology spread docs →</a>",
+  "<strong>Lesson · cluster autoscaling</strong><br>When the scheduler can't fit a pending pod, the cluster autoscaler adds a node. When utilization drops below a threshold for long enough, it removes nodes. Combined with HPA (pod count) and VPA (pod size), you get a system that grows and shrinks against load without humans in the loop.<br><a class='docs-link' target='_blank' href='https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler'>📖 cluster-autoscaler →</a>",
+  "<strong>Lesson · this IS the scheduler</strong><br>You just played the actual algorithm. The real K8s scheduler scores each pod-on-node candidate using filters (must satisfy all the constraints you saw) and scorers (prefer balanced packing, prefer co-location of certain workloads, prefer pre-warmed images, etc). Every line of work is a published heuristic. None of it is magic.<br><a class='docs-link' target='_blank' href='https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/'>📖 scheduling framework docs →</a>",
 ];
 
 /* ─── Game state ───────────────────────────────────────────────────────── */
@@ -2999,6 +3242,286 @@ sfx = function(type) {
   _origSfx(type);
 };
 
+
+/* ═════════════════════════════════════════════════════════════════════════
+   YAML INSPECTOR
+   ─────────────────
+   Renders the current cluster state as actual Kubernetes YAML. Every pod
+   placed becomes a real Pod manifest with the constraints reflected. The
+   "Easter egg" is that this is what production YAML actually looks like —
+   the player can copy it, paste it into a real cluster, and (after fixing
+   the image name) it'd schedule.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+function escapeYaml(s) {
+  if (typeof s !== "string") return String(s);
+  if (/[:#&*!|>'"%@\u0060]/.test(s) || s.includes("\n") || s === "") return JSON.stringify(s);
+  return s;
+}
+
+function colorYaml(yaml) {
+  // Tokenize for syntax highlighting
+  return yaml.split("\n").map(line => {
+    if (line.match(/^\s*#/)) return `<span class="com">${line.replace(/</g,"&lt;")}</span>`;
+    return line.replace(/^(\s*)([a-zA-Z][a-zA-Z0-9_-]*)(:)/, (_, ws, key, c) =>
+      `${ws}<span class="key">${key}</span>${c}`
+    ).replace(/: (".*?")/g, ': <span class="str">$1</span>')
+     .replace(/: (-?\d+\.?\d*)$/g, ': <span class="num">$1</span>')
+     .replace(/: (true|false)$/g, ': <span class="num">$1</span>')
+     .replace(/^(\s*)- (.+)$/, "$1<span class=\"key\">-</span> $2");
+  }).join("\n");
+}
+
+function podToYaml(pod, nodeName) {
+  // Build a real-looking Pod manifest
+  const labels = ["app: " + pod.type];
+  if (pod.affinityGroup) labels.push("deployment: " + pod.affinityGroup);
+  if (pod.priority === "high") labels.push("priority: critical");
+  if (pod.pairWith) labels.push("co-locate: " + pod.pairWith);
+  let aff = "";
+  if (pod.affinityGroup) {
+    aff = "  affinity:\n" +
+      "    podAntiAffinity:\n" +
+      "      requiredDuringSchedulingIgnoredDuringExecution:\n" +
+      "      - labelSelector:\n" +
+      "          matchLabels:\n" +
+      "            deployment: " + pod.affinityGroup + "\n" +
+      "        topologyKey: kubernetes.io/hostname\n";
+  }
+  if (pod.pairWith) {
+    aff += (aff ? "" : "  affinity:\n") +
+      "    podAffinity:\n" +
+      "      preferredDuringSchedulingIgnoredDuringExecution:\n" +
+      "      - weight: 100\n" +
+      "        podAffinityTerm:\n" +
+      "          labelSelector:\n" +
+      "            matchLabels:\n" +
+      "              co-locate: " + pod.pairWith + "\n" +
+      "          topologyKey: kubernetes.io/hostname\n";
+  }
+  let tol = "";
+  if (pod.taint) {
+    tol = "  tolerations:\n" +
+      "  - key: " + pod.taint + "\n" +
+      "    operator: Exists\n" +
+      "    effect: NoSchedule\n";
+  }
+  const kind = pod.stateful ? "StatefulSet (member)" : "Pod";
+  const prio = pod.priority === "high" ? "  priorityClassName: high-priority\n" : "";
+  const sched = nodeName ? "  # scheduled on: " + nodeName + "\n" : "";
+  return `apiVersion: v1
+kind: Pod
+metadata:
+  name: ${pod.name}
+  labels:
+    ${labels.join("\n    ")}
+spec:
+${sched}${prio}  containers:
+  - name: app
+    image: example.com/${pod.type}:v1
+    resources:
+      requests:
+        cpu: "${pod.cpu * 250}m"      # 1 game CPU = 250m real CPU
+        memory: "${pod.mem * 256}Mi"  # 1 game MEM = 256 MiB real
+      limits:
+        cpu: "${pod.cpu * 500}m"
+        memory: "${pod.mem * 512}Mi"
+${aff}${tol}`;
+}
+
+function nodeToYaml(node) {
+  const taintsLine = node.taints.length > 0
+    ? "  taints:\n  - key: " + node.taints[0] + "\n    value: \"true\"\n    effect: NoSchedule\n"
+    : "";
+  return `apiVersion: v1
+kind: Node
+metadata:
+  name: ${node.name}
+  labels:
+    node-type: ${node.taints.includes("gpu") ? "gpu" : "general"}
+status:
+  capacity:
+    cpu: "${node.cpu}"
+    memory: "${node.mem * 1024}Mi"
+spec:
+${taintsLine}`;
+}
+
+function renderYamlPanel() {
+  const wrap = $("#yaml-content");
+  wrap.innerHTML = "";
+  if (G.state !== "playing" && G.state !== "preempt") {
+    wrap.innerHTML = '<div class="blurb">Start a wave to see YAML.</div>';
+    return;
+  }
+  // Nodes
+  const nodeYaml = G.nodes.map(nodeToYaml).join("\n---\n");
+  const nodeDoc = document.createElement("div");
+  nodeDoc.className = "yaml-doc";
+  nodeDoc.innerHTML = colorYaml("# Cluster nodes\n" + nodeYaml);
+  wrap.appendChild(nodeDoc);
+  // Pods
+  const allPods = G.nodes.flatMap(n => n.pods.map(p => ({ pod: p, node: n.name })));
+  if (allPods.length > 0) {
+    const podYaml = allPods.map(({pod, node}) => podToYaml(pod, node)).join("\n---\n");
+    const podDoc = document.createElement("div");
+    podDoc.className = "yaml-doc";
+    podDoc.innerHTML = colorYaml("# Placed pods\n" + podYaml);
+    wrap.appendChild(podDoc);
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "blurb";
+    empty.textContent = "(no pods placed yet — place one and the YAML will appear here)";
+    wrap.appendChild(empty);
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   ROLLING UPDATE PRACTICE
+   ────────────────────────
+   A standalone challenge accessible from the title (after first victory) or
+   the post-victory tour. Teaches the rolling-update concept by FORCING you
+   to swap v1 pods for v2 pods while respecting a minimum-available count.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+const ROLLING_UPDATE_WAVE = {
+  title: "Rolling Update Practice",
+  intro: "<b>Rolling Update.</b> Six v1 pods are already running. Six v2 pods arrive to replace them. Maintain at least 4 running at all times — preempt v1 pods to make room for v2 pods that target them.",
+  density: 0.7,
+  practice: true,
+  rolling: true,
+  nodeTemplate: [
+    { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+    { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+    { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+  ],
+  podCount: 6,
+  podTypes: ["web"],
+  bailouts: 0,
+  constraints: { affinity: [{ label: "web-deployment", count: 6 }], taints: 0, stateful: false, priority: 0, affinityPair: 0 },
+};
+
+function startRollingPractice() {
+  // Set up the board: 6 v1 pods already placed (2 per node), then queue has 6 v2 pods
+  G.wave = 11; // special wave number
+  G.endlessActive = false;
+  G.score = 0;
+  G.combo = 0;
+  G.bestCombo = 0;
+  G.totalPlacedThisRun = 0;
+  G.hold = null;
+  G.modifiers = G.modifiers || { perfectMult: 1, slackBonus: false, pairMult: 1, comboGrace: 0, permaDefrag: 0,
+                                  extraBailoutsNext: 0, scoreMultNext: 1, lookaheadNext: 3, podShrinkNext: 1,
+                                  leanPodsNext: false, extraMiniNodeNext: false, defragChargesNext: 0,
+                                  shrinkNodesNext: false, disableHoldNext: false, zeroBailoutsNext: false };
+  G.nodes = ROLLING_UPDATE_WAVE.nodeTemplate.map(t => ({ ...t, taints: [...t.taints], pods: [] }));
+  // Place 6 v1 pods
+  podIdCounter = 1;
+  for (let i = 0; i < 6; i++) {
+    const v1 = makePod("web", { affinityGroup: "web-deployment" });
+    v1.name = "web-v1-" + (i+1);
+    v1.version = "v1";
+    G.nodes[i % 3].pods.push(v1);
+  }
+  // Queue: 6 v2 pods, each targeting a specific v1
+  G.pendingQueue = [];
+  for (let i = 0; i < 6; i++) {
+    const v2 = makePod("web", { affinityGroup: "web-deployment" });
+    v2.name = "web-v2-" + (i+1);
+    v2.version = "v2";
+    v2.rollingTarget = "web-v1-" + (i+1);  // which v1 pod this replaces
+    G.pendingQueue.push(v2);
+  }
+  G.visibleQueue = [];
+  refillVisibleQueue();
+  G.state = "playing";
+  G.rollingMode = true;
+  G.lastGenerationSolvable = true;
+  G.bailoutsRemaining = 0;
+  G.bailoutsUsedThisWave = 0;
+  G.nodeBailoutSequence = 0;
+  G.waveStats = { perfectNodes: 0, tightFits: 0, preempts: 0, paired: 0, bailouts: 0 };
+
+  // Hide screens
+  document.querySelectorAll(".screen").forEach(s => s.style.display = "none");
+  $("#hud-wave").parentElement.parentElement.style.opacity = "0.4";  // hide wave count visually
+
+  // Show tutorial
+  const tut = $("#tutorial");
+  tut.innerHTML = ROLLING_UPDATE_WAVE.intro;
+  tut.classList.remove("hidden");
+  setTimeout(() => tut.classList.add("hidden"), 12000);
+
+  renderBoard();
+  renderQueue();
+  renderHold();
+  updateHUD();
+  $("#message").innerHTML = "<b>Goal:</b> place each v2 pod on the same node as its target v1 (you'll evict the v1).";
+  sfx("wave-start");
+  updateMusicForState();
+}
+
+// Intercept placement for rolling-update mode: clicking a node with a matching
+// v1 pod triggers an eviction-then-place
+function tryRollingPlace(pod, node) {
+  if (!pod.rollingTarget) return null; // not a rolling update pod
+  // Is the target v1 on this node?
+  const targetIdx = node.pods.findIndex(p => p.name === pod.rollingTarget);
+  if (targetIdx < 0) {
+    return { ok: false, reason: "v2 must replace its matching v1 — try the node where " + pod.rollingTarget + " lives" };
+  }
+  // Check minimum-available: after this eviction + place, how many v1+v2 are running?
+  const allRunning = G.nodes.flatMap(n => n.pods).filter(p => p.affinityGroup === "web-deployment");
+  // After: remove the v1, add v2 → same count. But during the transition we
+  // simulate a brief drop. Allow it.
+  // Also enforce anti-affinity: the node mustn't already have a v2 from same group? Actually they're all "web-deployment" group, so all are anti-affinity. Same-node placement would be invalid. So we evict v1 from this node, then v2 is fine here.
+  return { ok: true, victim: node.pods[targetIdx] };
+}
+
+// Hook into placeCurrentOn: if rolling mode, route through tryRollingPlace
+const _origPlaceCurrentOn = placeCurrentOn;
+placeCurrentOn = function(nodeIdx) {
+  if (G.rollingMode) {
+    const pod = currentPod();
+    if (!pod) return;
+    const node = G.nodes[nodeIdx];
+    if (!node) return;
+    const r = tryRollingPlace(pod, node);
+    if (r === null) {
+      // Normal placement (shouldn't happen in pure rolling mode)
+      return _origPlaceCurrentOn(nodeIdx);
+    }
+    if (!r.ok) { invalidPlacement(node, r.reason); return; }
+    // Evict the v1
+    node.pods = node.pods.filter(p => p !== r.victim);
+    G.waveStats.preempts++;
+    sfx("preempt");
+    floatScore(0, 0, "evicted " + r.victim.name, "");
+    // Place the v2
+    doPlace(pod, node);
+    // Check rolling-update completion
+    if (G.visibleQueue.length === 0 && G.pendingQueue.length === 0) {
+      rollingComplete();
+    }
+    return;
+  }
+  return _origPlaceCurrentOn(nodeIdx);
+};
+
+function rollingComplete() {
+  G.state = "rollingDone";
+  G.rollingMode = false;
+  // Show a brief lesson screen
+  document.querySelectorAll(".screen").forEach(s => s.style.display = "none");
+  $("#hud-wave").parentElement.parentElement.style.opacity = "1";
+  alert("Rolling update complete!\n\nAll 6 pods were rolled from v1 to v2 — and at every point in time, between 5 and 6 pods were available to serve traffic. In real K8s, this is what 'maxUnavailable: 1, maxSurge: 1' achieves.\n\nIf you'd done it all at once (Recreate strategy) there'd have been a moment of zero pods running. That's what rolling updates prevent.");
+  // Back to title
+  G.state = "title";
+  $("#screen-title").style.display = "flex";
+  $("#hud").style.display = "none";
+  updateMusicForState();
+}
+
 function restart() {
   document.querySelectorAll(".screen").forEach(s => s.style.display = "none");
   updateMusicForState();
@@ -3158,6 +3681,73 @@ document.addEventListener("click", function startMusicOnce() {
   updateMusicForState();
   document.removeEventListener("click", startMusicOnce);
 }, { once: true });
+
+// ─── YAML inspector wiring ────────────────────────────────────────────
+$("#yaml-btn").addEventListener("click", () => {
+  const panel = $("#yaml-panel");
+  panel.classList.toggle("visible");
+  if (panel.classList.contains("visible")) renderYamlPanel();
+});
+$("#yaml-close").addEventListener("click", () => $("#yaml-panel").classList.remove("visible"));
+// Refresh YAML view when a pod is placed
+const _renderBoardOrig = renderBoard;
+renderBoard = function() { _renderBoardOrig(); if ($("#yaml-panel").classList.contains("visible")) renderYamlPanel(); };
+
+// ─── Intro flow on first run ───────────────────────────────────────────
+function sawIntro() { try { return localStorage.getItem("podTetris.sawIntro") === "1"; } catch { return false; } }
+function markIntroSeen() { try { localStorage.setItem("podTetris.sawIntro", "1"); } catch {} }
+const _origBtnStart = document.getElementById("btn-start").onclick;
+$("#btn-start").addEventListener("click", function showIntroFirst(e) {
+  // If they've never seen the intro, show it; otherwise jump straight in
+  if (!sawIntro()) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    $("#screen-title").style.display = "none";
+    $("#screen-intro").style.display = "flex";
+  }
+}, true);
+$("#btn-intro-continue").addEventListener("click", () => {
+  markIntroSeen();
+  $("#screen-intro").style.display = "none";
+  ensureAudio();
+  restart();
+});
+$("#btn-intro-skip").addEventListener("click", () => {
+  markIntroSeen();
+  $("#screen-intro").style.display = "none";
+  ensureAudio();
+  restart();
+});
+
+// ─── Tour screen (post-victory) ─────────────────────────────────────────
+$("#btn-show-tour").addEventListener("click", () => {
+  $("#screen-victory").style.display = "none";
+  $("#screen-tour").style.display = "flex";
+});
+$("#btn-tour-back-to-victory").addEventListener("click", () => {
+  $("#screen-tour").style.display = "none";
+  $("#screen-victory").style.display = "flex";
+});
+$("#link-rolling").addEventListener("click", e => {
+  e.preventDefault();
+  $("#screen-tour").style.display = "none";
+  startRollingPractice();
+});
+
+// ─── Rolling Update Practice button on title ──────────────────────────
+// Show it if the player has ever won Wave 10
+function maybeShowRollingPractice() {
+  const ach = loadAchievementState();
+  if (ach.maxWaveReached >= 11) {
+    $("#btn-practice-rolling").style.display = "inline-block";
+  }
+}
+$("#btn-practice-rolling").addEventListener("click", () => {
+  $("#screen-title").style.display = "none";
+  ensureAudio();
+  startRollingPractice();
+});
+maybeShowRollingPractice();
+
 
 </script>
 </body>
