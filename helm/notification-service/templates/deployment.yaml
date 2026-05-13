@@ -17,6 +17,8 @@ spec:
     metadata:
       labels:
         app: {{ .Release.Name }}
+        # Enables Service Bus egress NetworkPolicy (FIX #2)
+        needs-servicebus: "true"
       annotations:
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
@@ -51,6 +53,15 @@ spec:
             initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
             failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault

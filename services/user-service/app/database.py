@@ -22,6 +22,12 @@ engine = create_async_engine(
     max_overflow=20,       # Allow 20 extra connections at peak
     pool_recycle=3600,     # Recycle connections after 1 hour
     pool_pre_ping=True,    # Test connection before using (handles DB restarts)
+    # pool_timeout: how long to wait for a connection from the pool before
+    # raising TimeoutError. Without this, requests hang indefinitely when all
+    # 30 pool slots (pool_size + max_overflow) are exhausted under heavy load.
+    # 10 seconds is generous enough for a slow DB query, tight enough to fail
+    # fast and surface connection exhaustion before the HTTP client times out.
+    pool_timeout=10,
 )
 
 AsyncSessionLocal = async_sessionmaker(

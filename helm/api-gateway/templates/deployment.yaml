@@ -66,6 +66,25 @@ spec:
             initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
             failureThreshold: 3
+          # FIX #10: Container-level security context.
+          # These cannot be set at the pod level — they must be per-container.
+          securityContext:
+            allowPrivilegeEscalation: false  # Cannot gain more privileges than parent
+            readOnlyRootFilesystem: true      # Prevents writing to the container image layer
+            capabilities:
+              drop: ["ALL"]                   # Drop all Linux capabilities (root powers)
+              # If your app needs a capability (e.g. NET_BIND_SERVICE for port 80),
+              # add it back explicitly here. Our services use port 8000+ so none needed.
+      # FIX #10: Pod-level securityContext sets the user/group and seccomp profile.
+      # Container-level securityContext (below) enforces privilege restrictions
+      # that can only be set per-container, not at the pod level.
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        # RuntimeDefault seccomp profile: allows the most common syscalls and
+        # blocks dangerous ones (e.g. ptrace, setuid) without requiring a
+        # custom profile. Required by the Kubernetes 'restricted' PodSecurity standard.
+        seccompProfile:
+          type: RuntimeDefault

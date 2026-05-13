@@ -56,6 +56,12 @@ _GATEWAY_OWNED = frozenset({
     "x-original-url",    # NGINX/IIS header — backends may use for routing
     "x-rewrite-url",     # IIS header — same risk
     "host",              # Always set to upstream host, never forward client's
+    # FIX #8: Method override headers allow tunneling arbitrary HTTP verbs
+    # through POST. A client could send POST with X-HTTP-Method-Override: DELETE
+    # to bypass method-level ACLs in backends that respect this header.
+    "x-http-method-override",
+    "x-method-override",
+    "x-http-method",
 })
 
 

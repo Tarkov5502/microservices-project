@@ -49,9 +49,12 @@ class Settings(BaseSettings):
     # Do NOT combine ["*"] with allow_credentials=True — Starlette rejects it.
     allowed_origins: list[str] = []
 
-    # ── Rate limiting ─────────────────────────────────────────────────────────
-    rate_limit_requests: int = 100
+    # ── Rate limiting ──────────────────────────────────────────────────
+    rate_limit_requests: int = 100        # General limit per IP per window
     rate_limit_window_seconds: int = 60
+    # Tighter limit for login/register — prevents password brute-force.
+    # 10 attempts/min = still comfortable for real users, painful for bots.
+    auth_rate_limit_requests: int = 10
 
     class Config:
         env_file = ".env"

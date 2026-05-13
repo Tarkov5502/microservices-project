@@ -163,7 +163,7 @@ spec:
           port: 5432
 
 ---
-# ─── Allow all services to reach Redis ───────────────────────────────────────
+# ─── Allow all services to reach Redis ───────────────────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -176,9 +176,60 @@ spec:
   policyTypes:
     - Egress
   egress:
-    - ports:
+    # FIX #4: The original rule was missing the 'to:' field, which means it
+    # allowed egress to ANY IP on port 6380. That would permit a compromised
+    # pod to exfiltrate data to an attacker-controlled Redis server.
+    # Scoped to the AKS subnet where the Redis private endpoint lives.
+    # Replace CIDR with your actual aks_subnet_cidr from Terraform.
+    - to:
+        - ipBlock:
+            cidr: 10.0.4.0/22   # dev AKS subnet; use 10.1.4.0/22 for prod
+      ports:
         - protocol: TCP
-          port: 6380   # Azure Redis uses 6380 for TLS
+          port: 6380   # Azure Redis uses 6380 for TLS (never 6379 = plaintext)
+
+---
+# ─── FIX #2: Allow task/notification services to reach Azure Service Bus ─────
+# Without this rule the default-deny-all policy silently drops all AMQP
+# connections, causing Service Bus events to be lost with no visible error
+# (the SDK catches the exception and logs a warning that vanishes in stdout).
+#
+# Azure Service Bus requires:
+#   port 5671 — AMQP over TLS (primary protocol used by the Python SDK)
+#   port 443  — HTTPS / WebSocket fallback (used if AMQP port is blocked)
+#
+# We use a broad 0.0.0.0/0 destination here because Azure Service Bus
+# endpoints use Microsoft-managed IPs that can change. The traffic is still
+# restricted to labelled pods, specific ports, and is TLS-encrypted in transit.
+# A production hardening step is to add Azure Private Link for Service Bus,
+# which gives it a fixed private IP inside your VNet — at that point you can
+# scope the CIDR to your private endpoint subnet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-servicebus
+  namespace: microservices
+spec:
+  podSelector:
+    matchLabels:
+      needs-servicebus: "true"   # Only label task-service and notification-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # Exclude RFC 1918 private ranges to prevent lateral movement
+              # (Service Bus is a public Azure endpoint, not private)
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 5671   # AMQP over TLS
+        - protocol: TCP
+          port: 443    # HTTPS / WebSocket fallback
 
 ---
 # ─── Allow Prometheus to scrape metrics from all pods ────────────────────────

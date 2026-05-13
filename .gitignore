@@ -43,7 +43,7 @@ Thumbs.db
 *.swp
 *.swo
 
-# ─── Secrets (NEVER commit these) ────────────────────────────
+# ─── Secrets (NEVER commit these) ────────────────────────────────────────────────
 *.pem
 *.key
 *.crt
@@ -51,3 +51,8 @@ Thumbs.db
 *secret*
 *credentials*
 service-account*.json
+# Fix: cover all .env variants (.env.local, .env.production, .env.staging, etc.)
+# The original pattern only matched the exact '.env' filename.
+.env
+.env.*
+*.env

@@ -151,8 +151,8 @@ helm upgrade --install notification-service ./helm/notification-service -n micro
 | [Azure Services Guide](docs/azure/azure-services.md) | Every Azure service used, explained simply |
 | [Terraform Guide](docs/terraform/terraform-guide.md) | IaC concepts, modules, state, workspaces |
 | [Kubernetes Guide](docs/kubernetes/kubernetes-guide.md) | K8s objects, networking, scaling |
-| [Local Development](docs/guides/local-development.md) | Run all services locally with Docker Compose |
-| [Deployment Guide](docs/guides/deployment.md) | Step-by-step production deployment |
+| [Security Guide](docs/security/security-guide.md) | Defence-in-depth: every security control explained |
+| [Local Development](docs/guides/getting-started.md) | Run all services locally with Docker Compose |
 
 ---
 

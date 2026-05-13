@@ -1,0 +1,99 @@
+# =============================================================================
+# KUBERNETES: PodDisruptionBudgets (PDB)
+# PURPOSE: Guarantee minimum availability during voluntary disruptions.
+#
+# WHAT IS A VOLUNTARY DISRUPTION?
+#   - Node drain (e.g. for OS patching, node pool upgrades)
+#   - Cluster Autoscaler scaling down a node
+#   - kubectl drain <node> by an operator
+#
+# WITHOUT PDBs:
+#   If both replicas of api-gateway happen to land on the same node, a node
+#   drain evicts ALL of them simultaneously → full outage. Kubernetes doesn't
+#   know you need at least one running — it just evicts everything on the node.
+#
+# WITH PDBs:
+#   Kubernetes refuses to evict a pod if doing so would drop availability below
+#   minAvailable. The draining operation blocks until a new pod comes up on
+#   another node. This guarantees rolling maintenance with zero downtime.
+#
+# WHAT YOU'LL LEARN:
+#   - The difference between voluntary and involuntary disruptions
+#   - Why PDBs only matter when you have 2+ replicas
+#   - How cluster upgrades interact with PDBs
+#   - The relationship between PDB and HPA (HPA scales up → PDB protects down)
+#
+# IMPORTANT: minAvailable must be < maxReplicas of your HPA, otherwise a scale-
+#   down becomes impossible and the Cluster Autoscaler gets stuck. The safe
+#   formula: minAvailable = floor(minReplicas / 2) + 1, or use a percentage.
+# =============================================================================
+
+# ─── API Gateway ──────────────────────────────────────────────────────────────
+# The gateway is the single entry point — losing it means ALL requests fail.
+# With 2 replicas running, minAvailable=1 ensures at least one stays up
+# during node maintenance.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-api-gateway
+  namespace: microservices
+  labels:
+    app: api-gateway
+spec:
+  # minAvailable: the minimum number of pods that must be available at all times.
+  # Using an absolute integer (not %) for clarity. Match this to your HPA minReplicas.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+
+---
+# ─── User Service ─────────────────────────────────────────────────────────────
+# Without user-service, no one can log in. Login failures cascade to all
+# services since they can't validate tokens (token is validated at the gateway,
+# but refresh requires user-service).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-user-service
+  namespace: microservices
+  labels:
+    app: user-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: user-service
+
+---
+# ─── Task Service ─────────────────────────────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-task-service
+  namespace: microservices
+  labels:
+    app: task-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: task-service
+
+---
+# ─── Notification Service ─────────────────────────────────────────────────────
+# Unlike the others, notification-service is async. Losing it briefly doesn't
+# fail requests — Service Bus holds events for up to 14 days (configurable).
+# But we still want at least one replica to ensure event processing continues.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-notification-service
+  namespace: microservices
+  labels:
+    app: notification-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: notification-service

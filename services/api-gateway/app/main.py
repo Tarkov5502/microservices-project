@@ -21,6 +21,7 @@ from app.config import settings
 from app.routes.proxy import router as proxy_router
 from app.middleware.auth import JWTAuthMiddleware
 from app.middleware.rate_limiter import RateLimiterMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 # ─── Logging Setup ────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -71,17 +72,35 @@ async def lifespan(app: FastAPI):
     logger.info("HTTP client pool closed")
 
 
-# ─── FastAPI App ──────────────────────────────────────────────────────────────
+# ─── FastAPI App ────────────────────────────────────────────
+_is_prod = settings.environment == "production"
 app = FastAPI(
     title="API Gateway",
     description="Central entry point for the microservices platform",
     version="1.0.0",
-    docs_url="/docs" if settings.environment != "production" else None,
+    # FIX #5: Hiding /docs is not enough — /openapi.json is its own endpoint
+    # and gives attackers a complete map of every route and schema.
+    # Both must be disabled in production.
+    docs_url="/docs" if not _is_prod else None,
     redoc_url=None,
+    openapi_url="/openapi.json" if not _is_prod else None,
     lifespan=lifespan,
 )
 
-# ─── Middleware Stack (order matters — last added = first executed) ────────────
+# ─── Middleware Stack (order matters — last added = first executed) ────────
+#
+# Execution order (innermost → outermost on request path):
+#   JWTAuth → RateLimiter → CORS → SecurityHeaders → [client]
+#
+# Execution order on response path (reversed):
+#   [route handler] → JWTAuth → RateLimiter → CORS → SecurityHeaders → [client]
+#
+# SecurityHeaders is OUTERMOST so it applies its headers last,
+# meaning no inner middleware can accidentally override them.
+
+# FIX #6: Apply security headers to every response.
+app.add_middleware(SecurityHeadersMiddleware)
+
 # SECURITY: Do NOT combine allow_origins=["*"] with allow_credentials=True.
 # Starlette 0.37+ raises ValueError on startup for that combination.
 # This gateway does not use cookie-based auth, so credentials=False is correct.
@@ -92,10 +111,12 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
+# FIX #1: Pass auth_max_requests so login/register get a tighter bucket.
 app.add_middleware(
     RateLimiterMiddleware,
     max_requests=settings.rate_limit_requests,
     window_seconds=settings.rate_limit_window_seconds,
+    auth_max_requests=settings.auth_rate_limit_requests,
 )
 app.add_middleware(
     JWTAuthMiddleware,
@@ -123,8 +144,11 @@ async def record_metrics(request: Request, call_next):
         path=request.url.path,
     ).observe(elapsed)
 
-    # Add timing header so clients can see how long the gateway took
-    response.headers["X-Response-Time"] = f"{elapsed:.4f}s"
+    # NOTE: X-Response-Time removed in production — response timing leaks
+    # allow attackers to infer server-side behaviour (e.g. whether a user
+    # exists by comparing bcrypt timing). Keep it only in non-prod.
+    if settings.environment != "production":
+        response.headers["X-Response-Time"] = f"{elapsed:.4f}s"
     return response
 
 

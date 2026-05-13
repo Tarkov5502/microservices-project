@@ -21,12 +21,19 @@ metadata:
     # Istio label — if you later add a service mesh, this enables sidecar injection
     istio-injection: disabled
     # PodSecurity label: enforce security standards at namespace level.
-    # Both enforce and audit use 'baseline' — if audit were set to 'restricted'
-    # while we only enforce 'baseline', every pod would generate audit log
-    # noise for restrictions that aren't actually enforced (misleading).
-    pod-security.kubernetes.io/enforce: baseline
-    pod-security.kubernetes.io/audit: baseline
-    pod-security.kubernetes.io/warn: baseline
+    # FIX: Upgraded from 'baseline' to 'restricted'.
+    #
+    # baseline  — blocks privileged containers, hostNetwork, hostPID. Good start.
+    # restricted — additionally requires: non-root user, read-only rootfs,
+    #              seccomp profile, no privilege escalation, all caps dropped.
+    #
+    # Our Helm charts now include container-level securityContext satisfying
+    # all restricted requirements. Any future pod that skips those settings
+    # gets REJECTED by the API server before it can even schedule.
+    # This is the most important namespace-level hardening you can apply.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
 
 ---
 # ResourceQuota: limits the TOTAL resources consumed in the namespace.
