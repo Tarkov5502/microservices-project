@@ -423,6 +423,9 @@ defineScene({
   render(root) {
     root.appendChild(el("div", { class: "meta" }, "Chapter I · 2 · A small game"));
     root.appendChild(el("h1", { class: "chapter-title" }, "The Provisioning Race"));
+    root.appendChild(el("div", { class: "tip", html:
+      "<strong>★ Want the full version?</strong> Play <a href=\"../arcade/sysadmin-1999.html\"><b>Sysadmin 1999</b></a> — a 90-second time-pressure game where you provision 5 servers under interrupt fire. Then Terraform Mode shows how the same job takes 3 seconds. The version below is just a taste."
+    }));
     root.appendChild(el("p", { html:
       "To convince you why this matters, a race. You're the operator. You need to provision <b>10 servers</b>. " +
       "On the left: the click-ops way — you literally have to click through ten setup wizards. On the right: " +
@@ -1132,6 +1135,9 @@ defineScene({
   render(root) {
     root.appendChild(el("div", { class: "meta" }, "Chapter II · 2 · A small game"));
     root.appendChild(el("h1", { class: "chapter-title" }, "Whack the bees"));
+    root.appendChild(el("div", { class: "tip", html:
+      "<strong>★ Real game:</strong> <a href=\"../arcade/pod-defender.html\"><b>POD DEFENDER</b></a> — a 10-wave tower-defense where you survive against failures by buying the upgrades Kubernetes ships with. The toy below is just for a quick illustration."
+    }));
     root.appendChild(el("p", { html:
       "Your job: kill pods. Their job: come back. The hive controller is asked to keep 8 pods running at all times. " +
       "Click any pod to take it down. Watch what happens. Try to keep the hive empty for 5 seconds. (You won't be able to.)"
@@ -1294,6 +1300,9 @@ defineScene({
   render(root) {
     root.appendChild(el("div", { class: "meta" }, "Chapter II · 4 · A small game"));
     root.appendChild(el("h1", { class: "chapter-title" }, "Black Friday is here"));
+    root.appendChild(el("div", { class: "tip", html:
+      "<strong>★ Real game:</strong> <a href=\"../arcade/traffic-conductor.html\"><b>TRAFFIC CONDUCTOR</b></a> — 75 seconds of a real-shaped traffic curve, with arrow-key scaling. Afterward you watch HPA do the same run. The slider below is just preview."
+    }));
     root.appendChild(el("p", { html:
       "It's 11:59 PM the day before Black Friday. Traffic is about to multiply by 20x. Your service is currently at 2 pods. " +
       "Each pod can handle 100 requests/sec before it cooks. Slide load up. Watch the autoscaler add pods. " +
