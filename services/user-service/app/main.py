@@ -9,11 +9,12 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response
-from sqlalchemy import text
+from sqlalchemy import select, text
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
-from app.database import engine, Base
+from app.database import AsyncSessionLocal, engine, Base
+from app.models import User
 from app.routes.auth import router as auth_router
 from app.routes.users import router as users_router
 from app.telemetry import init_telemetry
@@ -21,6 +22,59 @@ from app.redis_client import get_redis, close_redis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+async def _bootstrap_initial_admin() -> None:
+    """
+    Promote the user identified by INITIAL_ADMIN_EMAIL to admin, if set.
+
+    SOLVES THE FIRST-ADMIN CHICKEN/EGG PROBLEM:
+      The /admin/users/{id}/promote endpoint requires the caller to already
+      be an admin. On a fresh deployment there are zero admins, so the route
+      is unreachable. This function bridges the gap.
+
+    BEHAVIOUR:
+      - If INITIAL_ADMIN_EMAIL is unset → no-op. Production should leave it
+        unset after first use.
+      - If the env var is set but no user with that email exists yet → log a
+        notice and continue. The next startup (after they register) will
+        promote them.
+      - If the user exists and is already admin → no-op.
+      - If the user exists and is not admin → set is_admin=True and commit.
+
+    The bootstrap user still has to register through the normal flow first
+    so a real bcrypt hash gets stored. This function NEVER creates accounts;
+    it only flips a flag on an existing one.
+    """
+    email = settings.initial_admin_email
+    if not email:
+        return
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(User).where(User.email == email))
+            user = result.scalar_one_or_none()
+            if user is None:
+                logger.info(
+                    "INITIAL_ADMIN_EMAIL=%s is set but no such user exists yet — "
+                    "register the account, then restart this service to promote it.",
+                    email,
+                )
+                return
+            if user.is_admin:
+                logger.info("Initial admin %s already promoted — no action taken.", email)
+                return
+            user.is_admin = True
+            await session.commit()
+            logger.warning(
+                "Promoted %s to admin via INITIAL_ADMIN_EMAIL bootstrap. "
+                "Unset this env var now to prevent accidental future re-promotion.",
+                email,
+            )
+    except Exception as exc:
+        # Failure to bootstrap an admin must not prevent the service from
+        # starting — the rest of the API still works for normal users.
+        logger.error("Initial admin bootstrap failed: %s", exc)
 
 
 @asynccontextmanager
@@ -44,6 +98,7 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database ready")
+    await _bootstrap_initial_admin()
     await get_redis()  # Establish Redis connection at startup (non-fatal if unavailable)
     init_telemetry(app, service_name="user-service", db_engine=engine)
     yield

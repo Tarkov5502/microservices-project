@@ -56,3 +56,13 @@ service-account*.json
 .env
 .env.*
 *.env
+
+
+# ─── Personal/local-only scripts ─────────────────────────────────────────────
+# Loose PowerShell scripts in the repo root tend to leak local user paths.
+# If you need a personal helper, put it in scripts/ or .vscode/ where it
+# can be reviewed before committing.
+*.ps1
+
+# ─── Generated K8s manifests (built by scripts/render-k8s-manifests.sh) ────
+kubernetes/services-rendered/

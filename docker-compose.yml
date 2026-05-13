@@ -79,6 +79,12 @@ services:
       REDIS_URL: "redis://redis:6379"
       JWT_SECRET: "dev-only-secret-change-in-production-please"
       JWT_EXPIRY_MINUTES: "60"
+      # Tight DB pool sizes for the local postgres:16-alpine container,
+      # which defaults to max_connections=100. Two services × default
+      # (10+20) = 60 connections at startup. Smaller pools leave headroom
+      # for psql sessions and the next service that gets added.
+      DB_POOL_SIZE: "5"
+      DB_MAX_OVERFLOW: "5"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
       OTEL_SERVICE_NAME: "user-service"
     ports:
@@ -105,6 +111,8 @@ services:
       ENVIRONMENT: development
       DATABASE_URL: "postgresql://appuser:apppassword@postgres:5432/taskdb"
       REDIS_URL: "redis://redis:6379"
+      DB_POOL_SIZE: "5"
+      DB_MAX_OVERFLOW: "5"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
       OTEL_SERVICE_NAME: "task-service"
       # SERVICEBUS_CONNECTION_STRING intentionally omitted — events log locally

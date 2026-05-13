@@ -33,8 +33,8 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: user-service
-          image: REPLACE_ACR_LOGIN_SERVER/user-service:latest
-          imagePullPolicy: Always
+          image: ${ACR_LOGIN_SERVER}/user-service:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8001
           securityContext:
@@ -55,17 +55,17 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
+                  name: user-service-kv-secrets
                   key: db-connection-string
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
+                  name: user-service-kv-secrets
                   key: redis-connection-string
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
+                  name: user-service-kv-secrets
                   key: jwt-secret
             - name: JWT_EXPIRY_MINUTES
               value: "60"

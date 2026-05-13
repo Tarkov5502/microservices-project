@@ -1,6 +1,6 @@
 replicaCount: 1
 image:
-  repository: REPLACE_ACR_LOGIN_SERVER/notification-service
+  repository: ${ACR_LOGIN_SERVER}/notification-service
   pullPolicy: IfNotPresent
   tag: "latest"
 service:
@@ -12,7 +12,6 @@ resources:
   limits:   { cpu: 250m, memory: 256Mi }
 autoscaling:
   enabled: false
-secretName: app-secrets
 env:
   ENVIRONMENT: production
   SERVICEBUS_TOPIC_TASKS: "task-events"

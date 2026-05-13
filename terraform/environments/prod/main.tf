@@ -18,9 +18,16 @@ terraform {
     azurerm = { source = "hashicorp/azurerm"; version = "~> 3.100" }
     random  = { source = "hashicorp/random";  version = "~> 3.6" }
   }
+  # State lives in Azure Blob Storage with built-in locking. Bootstrap the
+  # backend ONCE per subscription before this module's first `terraform init` —
+  # see terraform/bootstrap/. Replace storage_account_name with the value of
+  # `terraform output storage_account_name` from that module, or override at
+  # init time:
+  #
+  #   terraform init -backend-config="storage_account_name=sttfabc123"
   backend "azurerm" {
     resource_group_name  = "rg-terraform-state"
-    storage_account_name = "stterraformstate"
+    storage_account_name = "REPLACE_WITH_BOOTSTRAP_OUTPUT"
     container_name       = "tfstate"
     key                  = "microservices/prod/terraform.tfstate"   # Different key!
   }
@@ -134,6 +141,12 @@ module "aks" {
   app_node_min   = 3
   app_node_max   = 10
   app_node_count = 3
+
+  # Prod cluster is destroy-protected via an Azure management lock. To tear it
+  # down deliberately you must remove the lock first (or set this to false and
+  # re-apply). This is the default but we set it explicitly so a future reader
+  # sees the intent.
+  enable_destroy_protection = true
 
   tags = local.common_tags
 }

@@ -75,7 +75,7 @@ spec:
       verifyImages:
         - imageReferences:
             # Match all images from our ACR — replace with your ACR login server
-            - "REPLACE_ACR_LOGIN_SERVER/*"
+            - "${ACR_LOGIN_SERVER}/*"
 
           # Keyless verification via Sigstore/Fulcio
           attestors:

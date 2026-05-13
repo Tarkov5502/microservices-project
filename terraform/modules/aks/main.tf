@@ -130,15 +130,27 @@ resource "azurerm_kubernetes_cluster" "main" {
   tags = var.tags
 
   lifecycle {
-    # SAFETY: prevent_destroy stops 'terraform destroy' from deleting the cluster
-    # unless you first remove this block and re-apply. This is a deliberate
-    # friction point that prevents a single mistyped command from erasing a
-    # production cluster. Set to false ONLY in dev/test environments.
-    prevent_destroy = true
+    # Note: prevent_destroy MUST be a literal — Terraform refuses to interpolate
+    # variables here. To keep dev tear-downable while still protecting prod, we
+    # move the protection to an Azure-side management lock below, guarded by
+    # var.enable_destroy_protection.
     ignore_changes = [
       default_node_pool[0].node_count, # Autoscaler manages this
     ]
   }
+}
+
+# ─── Destroy Protection (Azure-side lock) ────────────────────────────────────
+# CanNotDelete: delete operations against the cluster — whether from Terraform,
+# the Azure CLI, or the portal — fail until the lock is removed. Terraform
+# applies and updates still work. Set var.enable_destroy_protection=false in
+# dev to skip this lock entirely and allow normal teardown.
+resource "azurerm_management_lock" "aks_no_delete" {
+  count      = var.enable_destroy_protection ? 1 : 0
+  name       = "lock-aks-${var.project_name}-${var.environment}"
+  scope      = azurerm_kubernetes_cluster.main.id
+  lock_level = "CanNotDelete"
+  notes      = "Destroy protection. Set enable_destroy_protection=false in tfvars to remove."
 }
 
 # ─── User Node Pool ───────────────────────────────────────────────────────────

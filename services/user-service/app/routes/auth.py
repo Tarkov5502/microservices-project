@@ -15,6 +15,7 @@ TOKEN ROTATION:
   alerting them to the compromise.
 """
 import asyncio
+import functools
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -45,7 +46,15 @@ from app.schemas import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_DUMMY_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=12)).decode()
+
+# Constant-time-safe bcrypt comparison target used when the requested account
+# doesn't exist. Computed lazily on first use rather than at module import,
+# so the ~250 ms bcrypt cost doesn't tax every process boot and every test
+# collection. functools.cache memoises the first call — subsequent lookups
+# return instantly.
+@functools.cache
+def _dummy_hash() -> str:
+    return bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=12)).decode()
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -158,7 +167,7 @@ async def login(
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
-    candidate_hash = user.hashed_password if user else _DUMMY_HASH
+    candidate_hash = user.hashed_password if user else _dummy_hash()
     password_ok = await _verify_password(payload.password, candidate_hash)
 
     # ── Step 3: Evaluate outcome. ───────────────────────────────────

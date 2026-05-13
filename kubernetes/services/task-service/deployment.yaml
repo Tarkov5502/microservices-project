@@ -33,8 +33,8 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: task-service
-          image: REPLACE_ACR_LOGIN_SERVER/task-service:latest
-          imagePullPolicy: Always
+          image: ${ACR_LOGIN_SERVER}/task-service:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8002
           securityContext:
@@ -55,17 +55,17 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
+                  name: task-service-kv-secrets
                   key: db-connection-string
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
+                  name: task-service-kv-secrets
                   key: redis-connection-string
             - name: SERVICEBUS_CONNECTION_STRING
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
+                  name: task-service-kv-secrets
                   key: sb-sender-connection-string
             - name: SERVICEBUS_TOPIC_TASKS
               value: "task-events"

@@ -10,10 +10,12 @@ SECURITY NOTES:
     set this explicitly. Additionally, allow_credentials=True is incompatible with
     wildcard origins in the CORS spec (Starlette 0.37 raises ValueError on startup).
 """
-from pydantic import field_validator
+import json
+
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
 
-# Algorithms we'll accept. "none" is explicitly omitted — it disables
+# Algorithms we will accept. "none" is explicitly omitted — it disables
 # signature verification entirely. RS*/ES* are fine too but not listed
 # because this service uses symmetric HS256 by default.
 _ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
@@ -32,6 +34,31 @@ _BANNED_SECRETS = frozenset({
 })
 
 
+def _parse_origins(raw: str) -> list[str]:
+    """
+    Accept comma-separated strings as well as JSON arrays.
+
+    Operators reach for `ALLOWED_ORIGINS=https://a.com,https://b.com` because
+    that is the shape they use everywhere else. The default pydantic-settings
+    parser for list[str] fields only accepts a JSON-encoded list and crashes
+    with SettingsError otherwise — which we worked around by typing the raw
+    field as a string and parsing it here.
+    """
+    if not raw:
+        return []
+    s = raw.strip()
+    if not s:
+        return []
+    if s.startswith("["):
+        try:
+            decoded = json.loads(s)
+            if isinstance(decoded, list):
+                return [str(x).strip() for x in decoded if str(x).strip()]
+        except json.JSONDecodeError:
+            pass
+    return [item.strip() for item in s.split(",") if item.strip()]
+
+
 class Settings(BaseSettings):
     environment: str = "development"
 
@@ -45,9 +72,21 @@ class Settings(BaseSettings):
     notification_service_url: str = "http://notification-service:8003"
 
     # ── CORS ─────────────────────────────────────────────────────────────────
-    # Intentionally no wildcard default. Set this per environment.
+    # Raw value read from the ALLOWED_ORIGINS env var. Typed as str (not
+    # list[str]) so pydantic-settings does NOT try to JSON-decode it at parse
+    # time — that decode was crashing the service whenever an operator set
+    # `ALLOWED_ORIGINS=https://app.example.com` (the natural form).
+    # Read settings.allowed_origins (the property below) to consume as a list.
     # Do NOT combine ["*"] with allow_credentials=True — Starlette rejects it.
-    allowed_origins: list[str] = []
+    allowed_origins_raw: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "ALLOWED_ORIGINS",
+            "allowed_origins",
+            "ALLOWED_ORIGINS_RAW",
+            "allowed_origins_raw",
+        ),
+    )
 
     # ── Rate limiting ──────────────────────────────────────────────────
     rate_limit_requests: int = 100        # General limit per IP per window
@@ -67,7 +106,22 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = False
 
-    # ── Validators ────────────────────────────────────────────────────────────
+    @property
+    def allowed_origins(self) -> list[str]:
+        """Parsed list of CORS-allowed origins."""
+        return _parse_origins(self.allowed_origins_raw)
+
+    @field_validator("allowed_origins_raw", mode="before")
+    @classmethod
+    def coerce_to_string(cls, v):
+        """Normalise any input to a string before storage."""
+        if v is None:
+            return ""
+        if isinstance(v, list):
+            # A JSON-array env value (or a programmatically-passed list) is
+            # joined back into the canonical comma-separated form.
+            return ",".join(str(x) for x in v)
+        return str(v)
 
     @field_validator("jwt_algorithm")
     @classmethod

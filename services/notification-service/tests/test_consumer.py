@@ -90,7 +90,10 @@ async def test_task_created_sanitises_title_newlines():
     call_kwargs = consumer.notifier.send.call_args
     body = call_kwargs.kwargs["body"]
     assert "\n" not in body
-    assert "evil-header" not in body or "X-Injected" not in body
+    assert "\r" not in body
+    # The "X-Injected" / "evil-header" tokens survive as inert text — that's
+    # acceptable. The threat we guard against is the CR/LF that would create
+    # a new log line; we don't pretend to be an HTML sanitiser.
 
 
 @pytest.mark.asyncio

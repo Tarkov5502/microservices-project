@@ -19,3 +19,17 @@ variable "app_node_min"     { type = number; default = 1 }
 variable "app_node_max"     { type = number; default = 5 }
 
 variable "tags"             { type = map(string); default = {} }
+
+# When true, an Azure Resource Lock is applied to the cluster that requires
+# the lock be removed (manually or via Terraform) before deletion can succeed.
+# Prefer this over Terraform's lifecycle.prevent_destroy because:
+#   1. prevent_destroy must be a literal — it cannot be driven by a variable,
+#      which forced the previous module to use the same value for dev and prod.
+#   2. The Azure-side lock survives Terraform state loss; prevent_destroy only
+#      protects against `terraform destroy` runs against this exact state file.
+# Recommended: true in prod, false in dev/test so you can tear down freely.
+variable "enable_destroy_protection" {
+  type        = bool
+  default     = true
+  description = "Apply an azurerm_management_lock(CanNotDelete) to the AKS cluster."
+}

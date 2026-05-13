@@ -8,12 +8,14 @@ async_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg:/
 engine = create_async_engine(
     async_url,
     echo=settings.environment == "development",
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=3600,
+    # All pool knobs come from settings so each environment can size them
+    # against its actual Postgres SKU. See user-service/app/database.py for
+    # the full rationale.
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_recycle=settings.db_pool_recycle,
     pool_pre_ping=True,
-    # See user-service/app/database.py for the full explanation of pool_timeout.
-    pool_timeout=10,
+    pool_timeout=settings.db_pool_timeout,
 )
 
 AsyncSessionLocal = async_sessionmaker(

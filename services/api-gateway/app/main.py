@@ -221,11 +221,24 @@ async def readiness() -> dict:
 async def metrics(request: Request):
     """
     Prometheus metrics endpoint.
-    Only accessible from within the cluster (no X-Forwarded-For header).
+
+    ACCESS CONTROL IS ENFORCED AT THE NETWORK LAYER, NOT HERE.
+      - In Kubernetes: NetworkPolicy 'allow-prometheus-scraping' permits only
+        pods in the monitoring namespace to reach :8000/metrics.
+      - At the ingress: NGINX's location block strips /metrics from external
+        traffic (see kubernetes/ingress/ingress.yaml).
+      - Locally: docker-compose exposes :8000 directly; on a dev laptop the
+        endpoint is intentionally reachable for inspection.
+
+    A previous version of this handler used the presence of X-Forwarded-For
+    as a "this came from outside" signal. That was fragile in two directions:
+      1. Any well-behaved internal proxy that sets XFF (e.g. a service mesh
+         sidecar, or a future shared egress proxy) would be incorrectly
+         blocked.
+      2. An attacker doesn't get to control whether they're allowed in based
+         on a header they can also set — so the check has never been an
+         actual security boundary.
+
+    Network-level controls are the correct place to enforce this.
     """
-    if request.headers.get("x-forwarded-for"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Metrics endpoint is not accessible externally",
-        )
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

@@ -18,16 +18,17 @@ async_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg:/
 engine = create_async_engine(
     async_url,
     echo=settings.environment == "development",  # Log SQL in dev only
-    pool_size=10,          # Keep 10 persistent connections
-    max_overflow=20,       # Allow 20 extra connections at peak
-    pool_recycle=3600,     # Recycle connections after 1 hour
-    pool_pre_ping=True,    # Test connection before using (handles DB restarts)
-    # pool_timeout: how long to wait for a connection from the pool before
-    # raising TimeoutError. Without this, requests hang indefinitely when all
-    # 30 pool slots (pool_size + max_overflow) are exhausted under heavy load.
-    # 10 seconds is generous enough for a slow DB query, tight enough to fail
-    # fast and surface connection exhaustion before the HTTP client times out.
-    pool_timeout=10,
+    # All four pool knobs are driven from settings so each environment can
+    # right-size them. The defaults (10 / 20) target a 30-conn ceiling per
+    # process, which multiplied by the HPA replica count gives the peak
+    # concurrent connections to Postgres. Dev should drop these to 5 / 5
+    # against a B1ms server (≈50-conn cap), prod can raise them on a
+    # GP_Standard sku.
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_recycle=settings.db_pool_recycle,  # Recycle stale connections
+    pool_pre_ping=True,                     # Test connection before each use
+    pool_timeout=settings.db_pool_timeout,  # Fail fast under exhaustion
 )
 
 AsyncSessionLocal = async_sessionmaker(

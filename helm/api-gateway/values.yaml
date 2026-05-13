@@ -7,7 +7,7 @@
 replicaCount: 2
 
 image:
-  repository: REPLACE_ACR_LOGIN_SERVER/api-gateway
+  repository: ${ACR_LOGIN_SERVER}/api-gateway
   # IfNotPresent: use the cached image if the exact tag exists on the node.
   # With immutable SHA-pinned tags from CI, Always forces a registry roundtrip
   # on every pod restart. If ACR is degraded, Always prevents pods from
@@ -40,11 +40,25 @@ env:
   USER_SERVICE_URL: "http://user-service:8001"
   TASK_SERVICE_URL: "http://task-service:8002"
   NOTIFICATION_SERVICE_URL: "http://notification-service:8003"
+
   # Redis URL is wired in at deploy time via the Azure Cache for Redis connection string.
   # Set via: helm upgrade --install api-gateway ./helm/api-gateway --set env.REDIS_URL=$REDIS_URL
   REDIS_URL: ""
 
-secretName: app-secrets
+  # Comma-separated list of origins the frontend(s) will call this gateway from.
+  # MUST be set per environment. The default is an EMPTY string, which makes
+  # CORS deny every browser request — safe by default. Override at install
+  # time: --set env.ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
+  ALLOWED_ORIGINS: ""
+
+  # Rate limit budget per client IP per window.
+  # General routes: 200 req / 60 s. Auth routes (login/register): 20 / 60 s.
+  # These are tighter than the in-code defaults because production assumes a
+  # shared Redis bucket across all gateway replicas; the in-code fallback
+  # would otherwise multiply by replica count.
+  RATE_LIMIT_REQUESTS: "200"
+  AUTH_RATE_LIMIT_REQUESTS: "20"
+
 
 livenessProbe:
   path: /health

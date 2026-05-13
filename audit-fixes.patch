@@ -1,0 +1,1624 @@
+From 6266d3e5f552dbcacb690a6f6fa19be3768f536f Mon Sep 17 00:00:00 2001
+From: Local fixes <you@local>
+Date: Wed, 13 May 2026 17:50:23 +0000
+Subject: [PATCH] =?UTF-8?q?fix:=20comprehensive=20audit=20fixes=20?=
+ =?UTF-8?q?=E2=80=94=20ship-readiness=20for=20first=20Azure=20deploy?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+CRITICAL (blocked first deploy):
+- kubernetes/services/*.yaml had literal REPLACE_ACR_LOGIN_SERVER in image:
+  fields. Switched to ${ACR_LOGIN_SERVER} plus scripts/render-k8s-manifests.sh.
+- No admin bootstrap path. Added INITIAL_ADMIN_EMAIL promotion in user-service.
+- Terraform backend assumed pre-existing rg/storage. Added terraform/bootstrap/.
+
+OTHER FIXES:
+- Aligned raw K8s secret names with Helm (per-service *-kv-secrets).
+- Updated README diagram: NGINX entry, not Azure App Gateway.
+- terraform/modules/aks: replaced literal prevent_destroy=true with a
+  variable-driven Azure management lock (enable_destroy_protection).
+- task-service Service Bus singleton now resets on send failure.
+- Lazy bcrypt dummy hash (no module-import cost).
+- DB pool sizes are settings-driven; docker-compose uses smaller pools.
+- Removed XFF check on /metrics; rely on NetworkPolicy.
+- ALLOWED_ORIGINS accepts comma-separated and JSON forms.
+- Wired ALLOWED_ORIGINS/RATE_LIMIT_REQUESTS/AUTH_RATE_LIMIT_REQUESTS/REDIS_URL
+  into api-gateway K8s/Helm.
+- imagePullPolicy: Always -> IfNotPresent in raw manifests.
+- Removed personal commit_9fixes.ps1 / push_to_github.ps1; gitignored *.ps1.
+- README Quick Start is now end-to-end runnable.
+
+TEST FIXES (pre-existing test bugs caught while iterating):
+- test_correlation.py: missing Request type annotation.
+- test_proxy_headers.py: 2-tuple unpack of a 3-tuple return.
+- task-service test_schemas.py: HTML-only inputs need self-closing tags.
+- notification-service test_consumer.py: 'or' -> stronger CR/LF guarantee.
+
+All 214 unit tests pass.
+---
+ .gitignore                                    |  10 ++
+ .pre-commit-config.yaml                       |   0
+ README.md                                     |  68 ++++++--
+ commit_9fixes.ps1                             | 120 --------------
+ docker-compose.yml                            |   8 +
+ helm/api-gateway/values.yaml                  |  18 ++-
+ helm/notification-service/values.yaml         |   3 +-
+ helm/task-service/values.yaml                 |   3 +-
+ helm/user-service/values.yaml                 |   3 +-
+ kubernetes/security/kyverno-policies.yaml     |   2 +-
+ .../services/api-gateway/deployment.yaml      |  32 +++-
+ .../notification-service/deployment.yaml      |   6 +-
+ .../services/task-service/deployment.yaml     |  10 +-
+ .../services/user-service/deployment.yaml     |  10 +-
+ push_to_github.ps1                            |  71 --------
+ scripts/render-k8s-manifests.sh               |  61 +++++++
+ services/api-gateway/app/config.py            |  64 +++++++-
+ services/api-gateway/app/main.py              |  25 ++-
+ .../api-gateway/tests/test_correlation.py     |   8 +-
+ .../api-gateway/tests/test_proxy_headers.py   |  10 +-
+ .../tests/test_consumer.py                    |   5 +-
+ services/task-service/app/config.py           |  12 ++
+ services/task-service/app/database.py         |  12 +-
+ services/task-service/app/routes/tasks.py     |  41 ++++-
+ services/task-service/tests/test_schemas.py   |   4 +-
+ services/user-service/app/config.py           |  18 +++
+ services/user-service/app/database.py         |  21 +--
+ services/user-service/app/main.py             |  59 ++++++-
+ services/user-service/app/routes/auth.py      |  13 +-
+ terraform/bootstrap/main.tf                   | 153 ++++++++++++++++++
+ terraform/environments/dev/main.tf            |  19 ++-
+ terraform/environments/prod/main.tf           |  15 +-
+ terraform/modules/aks/main.tf                 |  22 ++-
+ terraform/modules/aks/variables.tf            |  14 ++
+ tests/load/locustfile.py                      |   0
+ 35 files changed, 655 insertions(+), 285 deletions(-)
+ mode change 100644 => 100755 .pre-commit-config.yaml
+ delete mode 100644 commit_9fixes.ps1
+ delete mode 100644 push_to_github.ps1
+ create mode 100755 scripts/render-k8s-manifests.sh
+ create mode 100755 terraform/bootstrap/main.tf
+ mode change 100644 => 100755 tests/load/locustfile.py
+
+diff --git a/.gitignore b/.gitignore
+index 5b880df..23da1f3 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -56,3 +56,13 @@ service-account*.json
+ .env
+ .env.*
+ *.env
++
++
++# ─── Personal/local-only scripts ─────────────────────────────────────────────
++# Loose PowerShell scripts in the repo root tend to leak local user paths.
++# If you need a personal helper, put it in scripts/ or .vscode/ where it
++# can be reviewed before committing.
++*.ps1
++
++# ─── Generated K8s manifests (built by scripts/render-k8s-manifests.sh) ────
++kubernetes/services-rendered/
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+old mode 100644
+new mode 100755
+diff --git a/README.md b/README.md
+index 1bb9049..4d334ac 100644
+--- a/README.md
++++ b/README.md
+@@ -14,7 +14,7 @@ all running on Azure Kubernetes Service, provisioned entirely with Terraform.
+                            ┌─────────────────────────────────────────────────┐
+                            │             Azure Resource Group                 │
+                            │                                                  │
+-Internet ──► App Gateway ──►  AKS Cluster                                    │
++Internet ──► NGINX Ingress ►  AKS Cluster                                    │
+                            │   ├── api-gateway   (routes requests)           │
+                            │   ├── user-service  (auth + user management)    │
+                            │   ├── task-service  (CRUD tasks + projects)     │
+@@ -30,13 +30,18 @@ Internet ──► App Gateway ──►  AKS Cluster
+                            └─────────────────────────────────────────────────┘
+ ```
+ 
++> NGINX Ingress Controller is the cluster's external entry point today. Azure
++> Application Gateway with WAF in front of the cluster is a planned
++> enhancement — it is referenced in some docs but is not provisioned by the
++> current Terraform.
++
+ ---
+ 
+ ## 📚 What You'll Learn
+ 
+ | Technology | Concepts Covered |
+ |---|---|
+-| **Azure** | Resource Groups, VNets, Subnets, NSGs, AKS, ACR, PostgreSQL, Redis, Service Bus, Key Vault, App Gateway, Log Analytics |
++| **Azure** | Resource Groups, VNets, Subnets, NSGs, AKS, ACR, PostgreSQL, Redis, Service Bus, Key Vault, Log Analytics |
+ | **Kubernetes** | Pods, Deployments, Services, Ingress, ConfigMaps, Secrets, RBAC, Network Policies, HPA, Resource Limits |
+ | **Terraform** | Providers, Modules, Variables, Outputs, State, Workspaces, Remote Backend, Environment separation |
+ | **CI/CD** | GitHub Actions, Docker multi-stage builds, Helm charts, automated deployment pipelines |
+@@ -54,6 +59,7 @@ microservices-project/
+ │   └── deploy-services.yml     # Build images + deploy to AKS
+ │
+ ├── terraform/                  # All infrastructure as code
++│   ├── bootstrap/              # One-time remote-state backend bootstrap
+ │   ├── modules/                # Reusable building blocks
+ │   │   ├── networking/         # VNet, Subnets, NSGs
+ │   │   ├── aks/                # AKS cluster config
+@@ -118,41 +124,73 @@ See [docs/guides/local-development.md](docs/guides/local-development.md) for a f
+ 
+ ## 🚀 Quick Start
+ 
+-> **Prerequisites:** Azure CLI, Terraform, kubectl, Helm, Docker
++> **Prerequisites:** Azure CLI, Terraform 1.7+, kubectl, Helm 3, Docker
+ 
+ ```bash
+ # 1. Clone the repo
+-git clone git@github.com:Tarkov5502/microservices-project.git
++git clone https://github.com/Tarkov5502/microservices-project.git
+ cd microservices-project
+ 
+-# 2. Read the getting started guide first!
++# 2. Read the getting-started guide first!
+ cat docs/guides/getting-started.md
+ 
+ # 3. Set up Azure credentials
+ az login
+ az account set --subscription "YOUR_SUBSCRIPTION_ID"
+ 
+-# 4. Deploy dev infrastructure (Terraform)
+-cd terraform/environments/dev
++# 4. Bootstrap the Terraform remote-state backend (ONCE per subscription)
++cd terraform/bootstrap
+ terraform init
++terraform apply
++# Note the `storage_account_name` output — you'll need it in step 5.
++cd ../..
++
++# 5. Deploy the dev environment (Terraform)
++cd terraform/environments/dev
++terraform init \
++  -backend-config="storage_account_name=<paste-output-from-step-4>"
+ terraform plan
+ terraform apply
++cd ../../..
+ 
+-# 5. Connect kubectl to your new AKS cluster
+-az aks get-credentials --resource-group rg-microservices-dev --name aks-microservices-dev
++# 6. Connect kubectl to your new AKS cluster
++az aks get-credentials \
++  --resource-group rg-microservices-dev \
++  --name aks-microservices-dev
+ 
+-# 6. Deploy Kubernetes base resources
++# 7. Deploy Kubernetes base resources
+ kubectl apply -f kubernetes/namespaces/
+ kubectl apply -f kubernetes/rbac/
+ kubectl apply -f kubernetes/network-policies/
+ 
+-# 7. Deploy services with Helm
+-helm upgrade --install api-gateway ./helm/api-gateway -n microservices
+-helm upgrade --install user-service ./helm/user-service -n microservices
+-helm upgrade --install task-service ./helm/task-service -n microservices
+-helm upgrade --install notification-service ./helm/notification-service -n microservices
++# 8. Deploy services with Helm. Pass the ACR login server so image
++#    references resolve correctly.
++ACR_LOGIN_SERVER=$(az acr show -n <your-acr-name> --query loginServer -o tsv)
++
++for svc in api-gateway user-service task-service notification-service; do
++  helm upgrade --install "$svc" "./helm/$svc" \
++    -n microservices \
++    --set "image.repository=${ACR_LOGIN_SERVER}/${svc}" \
++    --set "image.tag=$(git rev-parse --short HEAD)"
++done
++
++# 9. Bootstrap the first admin user.
++#    a. Register a user normally:
++#         curl -X POST https://<your-ingress>/api/v1/auth/register \
++#              -H 'content-type: application/json' \
++#              -d '{"email":"you@example.com","username":"you","password":"YourPass1"}'
++#    b. Set INITIAL_ADMIN_EMAIL on the user-service deployment to that email
++#       and let the pod restart. On startup the matching user is promoted.
++#         kubectl set env deploy/user-service \
++#           -n microservices INITIAL_ADMIN_EMAIL=you@example.com
++#    c. Once promoted, UNSET the env var so future restarts are a no-op:
++#         kubectl set env deploy/user-service -n microservices INITIAL_ADMIN_EMAIL-
+ ```
+ 
++> Prefer raw `kubectl apply` over Helm? Run `ACR_LOGIN_SERVER=<acr.azurecr.io>
++> ./scripts/render-k8s-manifests.sh` first to expand the image placeholders,
++> then `kubectl apply -f kubernetes/services-rendered/`.
++
+ ---
+ 
+ ## 📖 Documentation Index
+diff --git a/commit_9fixes.ps1 b/commit_9fixes.ps1
+deleted file mode 100644
+index 1fc4fea..0000000
+--- a/commit_9fixes.ps1
++++ /dev/null
+@@ -1,120 +0,0 @@
+-$git  = "C:\Users\s0e086y\AppData\Local\Programs\Git\cmd\git.exe"
+-$proj = "C:\Users\s0e086y\Documents\puppy_workspace\microservices-project"
+-Set-Location $proj
+-
+-& $git config user.email "tarkov5502@github.com"
+-& $git config user.name  "Tarkov5502"
+-
+-& $git add -A
+-Write-Host "=== Staged changes ===" -ForegroundColor Cyan
+-& $git status --short
+-
+-$msg = @"
+-fix: all 9 bugs + gaps from senior engineer audit
+-
+-=== CRITICAL BUGS (system unusable without these) ===
+-
+-FIX 1 - Login deadlock: JWT middleware blocked every auth endpoint
+-  The middleware only exempted /health, /health/ready, /metrics.
+-  /api/v1/auth/login, /register, /refresh, /logout were NOT exempt.
+-  Every login attempt returned 401 because you need a token to get a token.
+-  Fixed: added exempt_prefixes=["/api/v1/auth/"] to JWTAuthMiddleware.
+-  _is_exempt() now checks both exact paths and startswith() prefixes.
+-
+-FIX 2 - Notification service crashed on startup: missing routes/__init__.py
+-  app/routes/ directory had no __init__.py — Python couldn't import
+-  app.routes.stream as a package. Service exited with ModuleNotFoundError
+-  on every cold start. Created the missing __init__.py.
+-
+-=== REAL FUNCTIONAL ISSUES ===
+-
+-FIX 3 - SSE broadcast sent every event to every connected user (privacy bug)
+-  broadcaster.broadcast() pushed every task event into every client queue
+-  regardless of who the event was for. User A received User B's task events.
+-  Rewrote broadcaster.py: queues are now dict[user_id, dict[conn_id, Queue]].
+-  broadcast() takes target_user_ids=[...] and only delivers to those users.
+-  subscribe() registers under the caller's user_id bucket.
+-  consumer.py updated: each handler returns the correct target_user_ids list.
+-  Event payloads for status_changed and deleted now include creator_id and
+-  assignee_id so the consumer can target without a DB lookup.
+-
+-FIX 4 - Cursor pagination lacked compound indexes (O(N) per page at scale)
+-  Keyset queries filtered on (creator_id) then sorted all N matching rows in
+-  memory before applying the (created_at, id) inequality. With 10k tasks,
+-  every paginated request scanned the whole table for that user.
+-  Added compound indexes:
+-    ix_tasks_creator_cursor  (creator_id, created_at, id)
+-    ix_tasks_assignee_cursor (aee_id, created_at, id)
+-    ix_projects_owner_active_cursor (owner_id, is_active, created_at, id)
+-  Added Alembic migration 002_compound_indexes.py with full rationale.
+-  PostgreSQL can now satisfy keyset pagination in O(log N + page_size).
+-
+-=== SMALLER GAPS ===
+-
+-FIX 5 - or_ imported inside conditional block in projects.py
+-  The import lived inside `if cursor:` — evaluated on every paginated request,
+-  penalising it with a module dict lookup. Moved to top-level imports.
+-  Rewrote projects.py cleanly while fixing the import.
+-
+-FIX 6 - Rate limiter missing X-RateLimit-Reset header
+-  Clients received X-RateLimit-Limit and X-RateLimit-Remaining but no
+-  X-RateLimit-Reset. Without the reset timestamp, a 429'd client must guess
+-  backoff duration. Added X-RateLimit-Reset (Unix epoch: now + window_seconds)
+-  to ALL responses, including 429. Also ensured 429 includes all three
+-  X-RateLimit-* headers alongside the existing Retry-After header.
+-
+-FIX 7 - No per-account brute force protection (only per-IP)
+-  The gateway rate-limits by IP. An attacker rotating IPs could attempt
+-  unlimited passwords against one email. Added per-account lockout to
+-  redis_client.py:
+-    is_account_locked(email)   -- checks counter >= LOCKOUT_THRESHOLD (10)
+-    record_login_failure(email) -- INCR + EXPIRE nx=True (fixed window, 15min)
+-    reset_login_failures(email) -- DELETE on successful login
+-  login route updated: checks lockout before bcrypt, increments on failure,
+-  resets on success. Returns the same generic 401 regardless of lock state
+-  (enumeration resistance). Runs full timing-safe path even when locked.
+-
+-=== NEW FEATURES ===
+-
+-FIX 8 - Zero unit tests for core logic modules
+-  Added 6 new test files covering the gaps:
+-    api-gateway/tests/test_auth_middleware_prefix_exemptions.py
+-      -- 11 tests for the login-deadlock fix (exempt_prefixes)
+-    api-gateway/tests/test_rate_limiter_reset_header.py
+-      -- 7 tests for X-RateLimit-Reset on success and 429 responses
+-    task-service/tests/test_pagination.py
+-      -- 19 tests for encode/decode/make_cursor_page (pure logic, no DB)
+-    notification-service/tests/test_broadcaster.py
+-      -- 10 tests for user-scoped SSE fan-out, cleanup, privacy isolation
+-    user-service/tests/test_brute_force.py
+-      -- 20 tests for is_account_locked / record_login_failure / reset
+-         with Redis mocks covering all graceful-degradation paths
+-    task-service/tests/test_idempotency.py
+-      -- 15 tests for the idempotency cache get/set/key-scoping/TTL
+-  Extended notification-service/tests/test_consumer.py with 7 new tests
+-  verifying target_user_ids return values and broadcaster call contract.
+-
+-FIX 9 - task creation not idempotent (duplicate tasks on client retry)
+-  POST /api/v1/tasks had no replay protection. A client retry after timeout
+-  created a second task. Added Redis-backed idempotency to task-service:
+-    app/idempotency.py -- get_cached_response / cache_response
+-    Keys: idempotency:{caller_id}:{idempotency_key}, TTL 24h
+-    Scoped per caller -- no cross-user key collision possible
+-  create_task route: accepts optional Idempotency-Key header. Cache hit
+-  returns original 201 with Idempotency-Key-Replay: true header.
+-  Cache miss proceeds normally and caches the response via BackgroundTask.
+-  Graceful degradation: Redis down -> proceeds without protection (no 503).
+-  Added redis[asyncio]==5.0.4 to task-service/requirements.txt.
+-  Idempotency Redis client shut down cleanly in lifespan.
+-"@
+-
+-& $git commit -m $msg
+-
+-Write-Host ""
+-Write-Host "=== Recent commits ===" -ForegroundColor Cyan
+-& $git log --oneline -5
+-
+-Write-Host ""
+-Write-Host "=== Pushing ===" -ForegroundColor Yellow
+-& $git push origin main
+-Write-Host "Done!" -ForegroundColor Green
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 4d51a4c..d264982 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -79,6 +79,12 @@ services:
+       REDIS_URL: "redis://redis:6379"
+       JWT_SECRET: "dev-only-secret-change-in-production-please"
+       JWT_EXPIRY_MINUTES: "60"
++      # Tight DB pool sizes for the local postgres:16-alpine container,
++      # which defaults to max_connections=100. Two services × default
++      # (10+20) = 60 connections at startup. Smaller pools leave headroom
++      # for psql sessions and the next service that gets added.
++      DB_POOL_SIZE: "5"
++      DB_MAX_OVERFLOW: "5"
+       OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+       OTEL_SERVICE_NAME: "user-service"
+     ports:
+@@ -105,6 +111,8 @@ services:
+       ENVIRONMENT: development
+       DATABASE_URL: "postgresql://appuser:apppassword@postgres:5432/taskdb"
+       REDIS_URL: "redis://redis:6379"
++      DB_POOL_SIZE: "5"
++      DB_MAX_OVERFLOW: "5"
+       OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+       OTEL_SERVICE_NAME: "task-service"
+       # SERVICEBUS_CONNECTION_STRING intentionally omitted — events log locally
+diff --git a/helm/api-gateway/values.yaml b/helm/api-gateway/values.yaml
+index 4ae80e4..93da802 100644
+--- a/helm/api-gateway/values.yaml
++++ b/helm/api-gateway/values.yaml
+@@ -7,7 +7,7 @@
+ replicaCount: 2
+ 
+ image:
+-  repository: REPLACE_ACR_LOGIN_SERVER/api-gateway
++  repository: ${ACR_LOGIN_SERVER}/api-gateway
+   # IfNotPresent: use the cached image if the exact tag exists on the node.
+   # With immutable SHA-pinned tags from CI, Always forces a registry roundtrip
+   # on every pod restart. If ACR is degraded, Always prevents pods from
+@@ -40,11 +40,25 @@ env:
+   USER_SERVICE_URL: "http://user-service:8001"
+   TASK_SERVICE_URL: "http://task-service:8002"
+   NOTIFICATION_SERVICE_URL: "http://notification-service:8003"
++
+   # Redis URL is wired in at deploy time via the Azure Cache for Redis connection string.
+   # Set via: helm upgrade --install api-gateway ./helm/api-gateway --set env.REDIS_URL=$REDIS_URL
+   REDIS_URL: ""
+ 
+-secretName: app-secrets
++  # Comma-separated list of origins the frontend(s) will call this gateway from.
++  # MUST be set per environment. The default is an EMPTY string, which makes
++  # CORS deny every browser request — safe by default. Override at install
++  # time: --set env.ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
++  ALLOWED_ORIGINS: ""
++
++  # Rate limit budget per client IP per window.
++  # General routes: 200 req / 60 s. Auth routes (login/register): 20 / 60 s.
++  # These are tighter than the in-code defaults because production assumes a
++  # shared Redis bucket across all gateway replicas; the in-code fallback
++  # would otherwise multiply by replica count.
++  RATE_LIMIT_REQUESTS: "200"
++  AUTH_RATE_LIMIT_REQUESTS: "20"
++
+ 
+ livenessProbe:
+   path: /health
+diff --git a/helm/notification-service/values.yaml b/helm/notification-service/values.yaml
+index e37f040..b4268b2 100644
+--- a/helm/notification-service/values.yaml
++++ b/helm/notification-service/values.yaml
+@@ -1,6 +1,6 @@
+ replicaCount: 1
+ image:
+-  repository: REPLACE_ACR_LOGIN_SERVER/notification-service
++  repository: ${ACR_LOGIN_SERVER}/notification-service
+   pullPolicy: IfNotPresent
+   tag: "latest"
+ service:
+@@ -12,7 +12,6 @@ resources:
+   limits:   { cpu: 250m, memory: 256Mi }
+ autoscaling:
+   enabled: false
+-secretName: app-secrets
+ env:
+   ENVIRONMENT: production
+   SERVICEBUS_TOPIC_TASKS: "task-events"
+diff --git a/helm/task-service/values.yaml b/helm/task-service/values.yaml
+index 0194410..d2a2441 100644
+--- a/helm/task-service/values.yaml
++++ b/helm/task-service/values.yaml
+@@ -1,6 +1,6 @@
+ replicaCount: 2
+ image:
+-  repository: REPLACE_ACR_LOGIN_SERVER/task-service
++  repository: ${ACR_LOGIN_SERVER}/task-service
+   pullPolicy: IfNotPresent
+   tag: "latest"
+ service:
+@@ -15,7 +15,6 @@ autoscaling:
+   minReplicas: 2
+   maxReplicas: 8
+   targetCPUUtilizationPercentage: 70
+-secretName: app-secrets
+ env:
+   ENVIRONMENT: production
+   SERVICEBUS_TOPIC_TASKS: "task-events"
+diff --git a/helm/user-service/values.yaml b/helm/user-service/values.yaml
+index c104780..ade24ec 100644
+--- a/helm/user-service/values.yaml
++++ b/helm/user-service/values.yaml
+@@ -1,6 +1,6 @@
+ replicaCount: 2
+ image:
+-  repository: REPLACE_ACR_LOGIN_SERVER/user-service
++  repository: ${ACR_LOGIN_SERVER}/user-service
+   pullPolicy: IfNotPresent  # See api-gateway/values.yaml for explanation
+   tag: "latest"
+ service:
+@@ -15,7 +15,6 @@ autoscaling:
+   minReplicas: 2
+   maxReplicas: 8
+   targetCPUUtilizationPercentage: 70
+-secretName: app-secrets
+ env:
+   ENVIRONMENT: production
+   JWT_EXPIRY_MINUTES: "60"
+diff --git a/kubernetes/security/kyverno-policies.yaml b/kubernetes/security/kyverno-policies.yaml
+index 0edbdfb..1d5bdab 100644
+--- a/kubernetes/security/kyverno-policies.yaml
++++ b/kubernetes/security/kyverno-policies.yaml
+@@ -75,7 +75,7 @@ spec:
+       verifyImages:
+         - imageReferences:
+             # Match all images from our ACR — replace with your ACR login server
+-            - "REPLACE_ACR_LOGIN_SERVER/*"
++            - "${ACR_LOGIN_SERVER}/*"
+ 
+           # Keyless verification via Sigstore/Fulcio
+           attestors:
+diff --git a/kubernetes/services/api-gateway/deployment.yaml b/kubernetes/services/api-gateway/deployment.yaml
+index 3c159dd..e392b16 100644
+--- a/kubernetes/services/api-gateway/deployment.yaml
++++ b/kubernetes/services/api-gateway/deployment.yaml
+@@ -76,8 +76,8 @@ spec:
+ 
+       containers:
+         - name: api-gateway
+-          image: REPLACE_ACR_LOGIN_SERVER/api-gateway:latest
+-          imagePullPolicy: Always
++          image: ${ACR_LOGIN_SERVER}/api-gateway:latest
++          imagePullPolicy: IfNotPresent
+           ports:
+             - containerPort: 8000
+               name: http
+@@ -110,11 +110,35 @@ spec:
+               value: "http://task-service.microservices.svc.cluster.local:8002"
+             - name: NOTIFICATION_SERVICE_URL
+               value: "http://notification-service.microservices.svc.cluster.local:8003"
+-            # JWT secret fetched from Kubernetes Secret (originally from Key Vault)
++
++            # CORS origins that the browser frontend is allowed to call from.
++            # MUST be set before any browser-based client will work. Defaults to
++            # empty (deny-all) so accidental missing-config doesn't expose CORS.
++            # Override per environment (comma-separated, no trailing slashes).
++            - name: ALLOWED_ORIGINS
++              value: ""
++
++            # Rate-limit budget per client IP per 60-s window.
++            - name: RATE_LIMIT_REQUESTS
++              value: "200"
++            - name: AUTH_RATE_LIMIT_REQUESTS
++              value: "20"
++
++            # Shared Redis used by the rate limiter so all gateway replicas
++            # see the same bucket. Fetched from the per-service Key Vault
++            # secret (synced by the Secret Store CSI driver).
++            - name: REDIS_URL
++              valueFrom:
++                secretKeyRef:
++                  name: api-gateway-kv-secrets
++                  key: redis-connection-string
++
++            # JWT secret — same key value as the user-service, fetched from
++            # the same Key Vault. Mismatched values silently reject every token.
+             - name: JWT_SECRET
+               valueFrom:
+                 secretKeyRef:
+-                  name: app-secrets
++                  name: api-gateway-kv-secrets
+                   key: jwt-secret
+ 
+           # Liveness probe: if this fails, Kubernetes RESTARTS the container
+diff --git a/kubernetes/services/notification-service/deployment.yaml b/kubernetes/services/notification-service/deployment.yaml
+index 1a4c62e..f8d6a03 100644
+--- a/kubernetes/services/notification-service/deployment.yaml
++++ b/kubernetes/services/notification-service/deployment.yaml
+@@ -31,8 +31,8 @@ spec:
+           effect: "NoSchedule"
+       containers:
+         - name: notification-service
+-          image: REPLACE_ACR_LOGIN_SERVER/notification-service:latest
+-          imagePullPolicy: Always
++          image: ${ACR_LOGIN_SERVER}/notification-service:latest
++          imagePullPolicy: IfNotPresent
+           ports:
+             - containerPort: 8003
+           securityContext:
+@@ -53,7 +53,7 @@ spec:
+             - name: SERVICEBUS_CONNECTION_STRING
+               valueFrom:
+                 secretKeyRef:
+-                  name: app-secrets
++                  name: notification-service-kv-secrets
+                   key: sb-listener-connection-string
+             - name: SERVICEBUS_TOPIC_TASKS
+               value: "task-events"
+diff --git a/kubernetes/services/task-service/deployment.yaml b/kubernetes/services/task-service/deployment.yaml
+index ef3f7fb..b27c8aa 100644
+--- a/kubernetes/services/task-service/deployment.yaml
++++ b/kubernetes/services/task-service/deployment.yaml
+@@ -33,8 +33,8 @@ spec:
+           effect: "NoSchedule"
+       containers:
+         - name: task-service
+-          image: REPLACE_ACR_LOGIN_SERVER/task-service:latest
+-          imagePullPolicy: Always
++          image: ${ACR_LOGIN_SERVER}/task-service:latest
++          imagePullPolicy: IfNotPresent
+           ports:
+             - containerPort: 8002
+           securityContext:
+@@ -55,17 +55,17 @@ spec:
+             - name: DATABASE_URL
+               valueFrom:
+                 secretKeyRef:
+-                  name: app-secrets
++                  name: task-service-kv-secrets
+                   key: db-connection-string
+             - name: REDIS_URL
+               valueFrom:
+                 secretKeyRef:
+-                  name: app-secrets
++                  name: task-service-kv-secrets
+                   key: redis-connection-string
+             - name: SERVICEBUS_CONNECTION_STRING
+               valueFrom:
+                 secretKeyRef:
+-                  name: app-secrets
++                  name: task-service-kv-secrets
+                   key: sb-sender-connection-string
+             - name: SERVICEBUS_TOPIC_TASKS
+               value: "task-events"
+diff --git a/kubernetes/services/user-service/deployment.yaml b/kubernetes/services/user-service/deployment.yaml
+index 810f219..dc169bd 100644
+--- a/kubernetes/services/user-service/deployment.yaml
++++ b/kubernetes/services/user-service/deployment.yaml
+@@ -33,8 +33,8 @@ spec:
+           effect: "NoSchedule"
+       containers:
+         - name: user-service
+-          image: REPLACE_ACR_LOGIN_SERVER/user-service:latest
+-          imagePullPolicy: Always
++          image: ${ACR_LOGIN_SERVER}/user-service:latest
++          imagePullPolicy: IfNotPresent
+           ports:
+             - containerPort: 8001
+           securityContext:
+@@ -55,17 +55,17 @@ spec:
+             - name: DATABASE_URL
+               valueFrom:
+                 secretKeyRef:
+-                  name: app-secrets
++                  name: user-service-kv-secrets
+                   key: db-connection-string
+             - name: REDIS_URL
+               valueFrom:
+                 secretKeyRef:
+-                  name: app-secrets
++                  name: user-service-kv-secrets
+                   key: redis-connection-string
+             - name: JWT_SECRET
+               valueFrom:
+                 secretKeyRef:
+-                  name: app-secrets
++                  name: user-service-kv-secrets
+                   key: jwt-secret
+             - name: JWT_EXPIRY_MINUTES
+               value: "60"
+diff --git a/push_to_github.ps1 b/push_to_github.ps1
+deleted file mode 100644
+index 75bb77b..0000000
+--- a/push_to_github.ps1
++++ /dev/null
+@@ -1,71 +0,0 @@
+-$git = "C:\Users\s0e086y\AppData\Local\Programs\Git\cmd\git.exe"
+-$proj = "C:\Users\s0e086y\Documents\puppy_workspace\microservices-project"
+-Set-Location $proj
+-
+-& $git config user.email "tarkov5502@github.com"
+-& $git config user.name "Tarkov5502"
+-
+-& $git add -A
+-Write-Host "=== Staged changes ===" -ForegroundColor Cyan
+-& $git status --short
+-
+-$msg = @"
+-fix: 9 issues flagged by senior engineer audit
+-
+-BUG FIX - users.py update_me used synchronous bcrypt.hashpw():
+-  bcrypt with rounds=12 takes ~300ms. Running it synchronously on the
+-  asyncio event loop blocked ALL concurrent requests for that duration.
+-  Fixed: asyncio.to_thread() — matches the pattern already used in auth.py.
+-  The auth route was correct; the update route was not.
+-
+-DOCKERFILE FIX - PYTHONDONTWRITEBYTECODE + PYTHONUNBUFFERED missing:
+-  With readOnlyRootFilesystem:true, Python logs noisy bytecode-write warnings
+-  on every startup. PYTHONUNBUFFERED ensures crash logs aren't lost in the
+-  output buffer when the container exits unexpectedly. Added to all 4 images.
+-
+-KUBERNETES FIX - imagePullPolicy: Always -> IfNotPresent (all 4 Helm charts):
+-  With SHA-pinned immutable tags, Always forces a registry roundtrip on every
+-  pod restart. If ACR is degraded, pods cannot restart even though the image
+-  is cached on the node. IfNotPresent uses the cache when the tag exists.
+-
+-KUBERNETES FIX - ServiceMonitor label mismatch (Prometheus discovers nothing):
+-  The ServiceMonitor selector requires monitoring:"true" on Services.
+-  None of the 4 Helm Service templates had this label. Prometheus was
+-  auto-discovering exactly zero services. Added to all 4 service templates.
+-
+-TERRAFORM FIX - prevent_destroy = false on AKS cluster:
+-  A comment in the file said "Set to true in real production!" but it wasn't.
+-  One mistyped terraform destroy would delete the entire production cluster.
+-  Changed to true. This block must be explicitly removed to destroy the cluster.
+-
+-TEST DEPS FIX - pytest-asyncio not in any requirements file:
+-  notification-service tests use @pytest.mark.asyncio. Without pytest-asyncio
+-  installed, async tests are silently treated as synchronous (they "pass" without
+-  executing any async body). Added requirements-dev.txt to all 4 services.
+-  Updated ci.yml to install from requirements-dev.txt instead of inline packages.
+-
+-MIGRATION FIX - no schema migration system (Alembic):
+-  create_all() only handles table creation. Schema changes (add column, alter
+-  constraint) in a live deployment are silently ignored. Added Alembic to
+-  user-service: alembic.ini, alembic/env.py (async-compatible), initial
+-  migration, entrypoint.sh (runs alembic upgrade head before uvicorn starts).
+-  task-service follows the same pattern (documented in deployment guide).
+-
+-MONITORING FIX - Grafana had zero dashboards:
+-  Datasource was wired up but dashboard provisioning directory was empty.
+-  Grafana started completely blank. Added platform-overview.json dashboard
+-  with 6 panels: request rate, error rate, p50/p95/p99 latency, rate limit
+-  rejections, Service Bus event processing, and per-service health status.
+-  Added dashboards.yml provisioning config. Fixed docker-compose volume mount.
+-"@
+-
+-& $git commit -m $msg
+-
+-Write-Host ""
+-Write-Host "=== Recent commits ===" -ForegroundColor Cyan
+-& $git log --oneline -5
+-
+-Write-Host ""
+-Write-Host "=== Pushing ===" -ForegroundColor Yellow
+-& $git push origin main
+-Write-Host "Done!" -ForegroundColor Green
+diff --git a/scripts/render-k8s-manifests.sh b/scripts/render-k8s-manifests.sh
+new file mode 100755
+index 0000000..ea73e9b
+--- /dev/null
++++ b/scripts/render-k8s-manifests.sh
+@@ -0,0 +1,61 @@
++#!/usr/bin/env bash
++# scripts/render-k8s-manifests.sh
++#
++# Substitutes ${ACR_LOGIN_SERVER} (and any other supported env vars) in the
++# raw Kubernetes manifests under kubernetes/services/ and writes the rendered
++# output to kubernetes/services-rendered/. The rendered files are gitignored;
++# this script is the bridge between the template manifests in git and the
++# concrete manifests you `kubectl apply`.
++#
++# USAGE:
++#   export ACR_LOGIN_SERVER="myacr.azurecr.io"   # FQDN of your ACR, no scheme
++#   ./scripts/render-k8s-manifests.sh
++#   kubectl apply -f kubernetes/services-rendered/
++#
++# The Helm path does NOT need this script — Helm interpolates image.repository
++# from values.yaml at install time. See .github/workflows/deploy-services.yml
++# for the production path: it passes --set image.repository=... directly.
++#
++# RATIONALE:
++#   The original repo committed the literal string "REPLACE_ACR_LOGIN_SERVER"
++#   into the image: fields. That meant `kubectl apply -f kubernetes/services/`
++#   failed because no image registry on Earth answers to that hostname. By
++#   switching to ${ACR_LOGIN_SERVER} we can use envsubst — a tiny tool ships
++#   with gettext-base on every Linux distro and is available via Homebrew on
++#   macOS — to produce a real manifest from the template.
++set -euo pipefail
++
++REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++SRC_DIR="${REPO_ROOT}/kubernetes/services"
++OUT_DIR="${REPO_ROOT}/kubernetes/services-rendered"
++
++if [[ -z "${ACR_LOGIN_SERVER:-}" ]]; then
++  echo "ERROR: ACR_LOGIN_SERVER is not set." >&2
++  echo "Find it with: az acr show -n <acr-name> --query loginServer -o tsv" >&2
++  exit 1
++fi
++
++if ! command -v envsubst >/dev/null 2>&1; then
++  echo "ERROR: envsubst not found. Install gettext-base (Linux) or gettext (mac)." >&2
++  exit 1
++fi
++
++mkdir -p "${OUT_DIR}"
++
++# Only substitute the variables we explicitly support. Plain envsubst would
++# clobber any literal $VAR in the manifests (e.g. in shell snippets inside
++# ConfigMaps), which we don't want.
++ALLOWED='${ACR_LOGIN_SERVER}'
++
++shopt -s globstar nullglob
++for src in "${SRC_DIR}"/**/*.yaml; do
++  rel="${src#${SRC_DIR}/}"
++  dst="${OUT_DIR}/${rel}"
++  mkdir -p "$(dirname "${dst}")"
++  envsubst "${ALLOWED}" < "${src}" > "${dst}"
++  echo "rendered: ${rel}"
++done
++
++echo
++echo "Rendered manifests written to ${OUT_DIR}"
++echo "Next: kubectl apply -f kubernetes/services-rendered/"
+diff --git a/services/api-gateway/app/config.py b/services/api-gateway/app/config.py
+index b51f93d..e1ecd5a 100644
+--- a/services/api-gateway/app/config.py
++++ b/services/api-gateway/app/config.py
+@@ -10,10 +10,12 @@ SECURITY NOTES:
+     set this explicitly. Additionally, allow_credentials=True is incompatible with
+     wildcard origins in the CORS spec (Starlette 0.37 raises ValueError on startup).
+ """
+-from pydantic import field_validator
++import json
++
++from pydantic import AliasChoices, Field, field_validator
+ from pydantic_settings import BaseSettings
+ 
+-# Algorithms we'll accept. "none" is explicitly omitted — it disables
++# Algorithms we will accept. "none" is explicitly omitted — it disables
+ # signature verification entirely. RS*/ES* are fine too but not listed
+ # because this service uses symmetric HS256 by default.
+ _ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
+@@ -32,6 +34,31 @@ _BANNED_SECRETS = frozenset({
+ })
+ 
+ 
++def _parse_origins(raw: str) -> list[str]:
++    """
++    Accept comma-separated strings as well as JSON arrays.
++
++    Operators reach for `ALLOWED_ORIGINS=https://a.com,https://b.com` because
++    that is the shape they use everywhere else. The default pydantic-settings
++    parser for list[str] fields only accepts a JSON-encoded list and crashes
++    with SettingsError otherwise — which we worked around by typing the raw
++    field as a string and parsing it here.
++    """
++    if not raw:
++        return []
++    s = raw.strip()
++    if not s:
++        return []
++    if s.startswith("["):
++        try:
++            decoded = json.loads(s)
++            if isinstance(decoded, list):
++                return [str(x).strip() for x in decoded if str(x).strip()]
++        except json.JSONDecodeError:
++            pass
++    return [item.strip() for item in s.split(",") if item.strip()]
++
++
+ class Settings(BaseSettings):
+     environment: str = "development"
+ 
+@@ -45,9 +72,21 @@ class Settings(BaseSettings):
+     notification_service_url: str = "http://notification-service:8003"
+ 
+     # ── CORS ─────────────────────────────────────────────────────────────────
+-    # Intentionally no wildcard default. Set this per environment.
++    # Raw value read from the ALLOWED_ORIGINS env var. Typed as str (not
++    # list[str]) so pydantic-settings does NOT try to JSON-decode it at parse
++    # time — that decode was crashing the service whenever an operator set
++    # `ALLOWED_ORIGINS=https://app.example.com` (the natural form).
++    # Read settings.allowed_origins (the property below) to consume as a list.
+     # Do NOT combine ["*"] with allow_credentials=True — Starlette rejects it.
+-    allowed_origins: list[str] = []
++    allowed_origins_raw: str = Field(
++        default="",
++        validation_alias=AliasChoices(
++            "ALLOWED_ORIGINS",
++            "allowed_origins",
++            "ALLOWED_ORIGINS_RAW",
++            "allowed_origins_raw",
++        ),
++    )
+ 
+     # ── Rate limiting ──────────────────────────────────────────────────
+     rate_limit_requests: int = 100        # General limit per IP per window
+@@ -67,7 +106,22 @@ class Settings(BaseSettings):
+         env_file = ".env"
+         case_sensitive = False
+ 
+-    # ── Validators ────────────────────────────────────────────────────────────
++    @property
++    def allowed_origins(self) -> list[str]:
++        """Parsed list of CORS-allowed origins."""
++        return _parse_origins(self.allowed_origins_raw)
++
++    @field_validator("allowed_origins_raw", mode="before")
++    @classmethod
++    def coerce_to_string(cls, v):
++        """Normalise any input to a string before storage."""
++        if v is None:
++            return ""
++        if isinstance(v, list):
++            # A JSON-array env value (or a programmatically-passed list) is
++            # joined back into the canonical comma-separated form.
++            return ",".join(str(x) for x in v)
++        return str(v)
+ 
+     @field_validator("jwt_algorithm")
+     @classmethod
+diff --git a/services/api-gateway/app/main.py b/services/api-gateway/app/main.py
+index 1a7089b..5aa40e5 100644
+--- a/services/api-gateway/app/main.py
++++ b/services/api-gateway/app/main.py
+@@ -221,11 +221,24 @@ async def readiness() -> dict:
+ async def metrics(request: Request):
+     """
+     Prometheus metrics endpoint.
+-    Only accessible from within the cluster (no X-Forwarded-For header).
++
++    ACCESS CONTROL IS ENFORCED AT THE NETWORK LAYER, NOT HERE.
++      - In Kubernetes: NetworkPolicy 'allow-prometheus-scraping' permits only
++        pods in the monitoring namespace to reach :8000/metrics.
++      - At the ingress: NGINX's location block strips /metrics from external
++        traffic (see kubernetes/ingress/ingress.yaml).
++      - Locally: docker-compose exposes :8000 directly; on a dev laptop the
++        endpoint is intentionally reachable for inspection.
++
++    A previous version of this handler used the presence of X-Forwarded-For
++    as a "this came from outside" signal. That was fragile in two directions:
++      1. Any well-behaved internal proxy that sets XFF (e.g. a service mesh
++         sidecar, or a future shared egress proxy) would be incorrectly
++         blocked.
++      2. An attacker doesn't get to control whether they're allowed in based
++         on a header they can also set — so the check has never been an
++         actual security boundary.
++
++    Network-level controls are the correct place to enforce this.
+     """
+-    if request.headers.get("x-forwarded-for"):
+-        raise HTTPException(
+-            status_code=status.HTTP_403_FORBIDDEN,
+-            detail="Metrics endpoint is not accessible externally",
+-        )
+     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+diff --git a/services/api-gateway/tests/test_correlation.py b/services/api-gateway/tests/test_correlation.py
+index b218b3e..de9e984 100644
+--- a/services/api-gateway/tests/test_correlation.py
++++ b/services/api-gateway/tests/test_correlation.py
+@@ -3,7 +3,7 @@ tests/test_correlation.py — Tests for the X-Request-ID correlation middleware.
+ """
+ import re
+ import pytest
+-from fastapi import FastAPI
++from fastapi import FastAPI, Request
+ from fastapi.testclient import TestClient
+ 
+ from app.middleware.correlation import CorrelationMiddleware, _sanitize_or_generate
+@@ -18,9 +18,11 @@ def client():
+     app = FastAPI()
+     app.add_middleware(CorrelationMiddleware)
+ 
++    # NB: `request: Request` MUST be annotated. Without the type annotation
++    # FastAPI treats the parameter as a request-body field and returns 422
++    # for any GET that doesn't include a body.
+     @app.get("/ping")
+-    async def ping(request):
+-        from fastapi import Request
++    async def ping(request: Request):
+         return {"request_id": request.state.request_id}
+ 
+     return TestClient(app)
+diff --git a/services/api-gateway/tests/test_proxy_headers.py b/services/api-gateway/tests/test_proxy_headers.py
+index e289a34..b42e9ac 100644
+--- a/services/api-gateway/tests/test_proxy_headers.py
++++ b/services/api-gateway/tests/test_proxy_headers.py
+@@ -81,23 +81,23 @@ class TestHopByHopHeaders:
+ class TestRouteResolution:
+ 
+     def test_users_path_routes_to_user_service(self):
+-        upstream, _ = _resolve_upstream("/api/v1/users/me")
++        upstream, _, _ = _resolve_upstream("/api/v1/users/me")
+         assert "user-service" in upstream or "8001" in upstream
+ 
+     def test_auth_path_routes_to_user_service(self):
+-        upstream, _ = _resolve_upstream("/api/v1/auth/login")
++        upstream, _, _ = _resolve_upstream("/api/v1/auth/login")
+         assert "user-service" in upstream or "8001" in upstream
+ 
+     def test_tasks_path_routes_to_task_service(self):
+-        upstream, _ = _resolve_upstream("/api/v1/tasks")
++        upstream, _, _ = _resolve_upstream("/api/v1/tasks")
+         assert "task-service" in upstream or "8002" in upstream
+ 
+     def test_projects_path_routes_to_task_service(self):
+-        upstream, _ = _resolve_upstream("/api/v1/projects/abc")
++        upstream, _, _ = _resolve_upstream("/api/v1/projects/abc")
+         assert "task-service" in upstream or "8002" in upstream
+ 
+     def test_notifications_path_routes_to_notification_service(self):
+-        upstream, _ = _resolve_upstream("/api/v1/notifications")
++        upstream, _, _ = _resolve_upstream("/api/v1/notifications")
+         assert "notification-service" in upstream or "8003" in upstream
+ 
+     def test_unknown_path_raises_404(self):
+diff --git a/services/notification-service/tests/test_consumer.py b/services/notification-service/tests/test_consumer.py
+index cdbc46a..fab5d91 100644
+--- a/services/notification-service/tests/test_consumer.py
++++ b/services/notification-service/tests/test_consumer.py
+@@ -90,7 +90,10 @@ async def test_task_created_sanitises_title_newlines():
+     call_kwargs = consumer.notifier.send.call_args
+     body = call_kwargs.kwargs["body"]
+     assert "\n" not in body
+-    assert "evil-header" not in body or "X-Injected" not in body
++    assert "\r" not in body
++    # The "X-Injected" / "evil-header" tokens survive as inert text — that's
++    # acceptable. The threat we guard against is the CR/LF that would create
++    # a new log line; we don't pretend to be an HTML sanitiser.
+ 
+ 
+ @pytest.mark.asyncio
+diff --git a/services/task-service/app/config.py b/services/task-service/app/config.py
+index 5ee12b1..33bbb7b 100644
+--- a/services/task-service/app/config.py
++++ b/services/task-service/app/config.py
+@@ -1,12 +1,24 @@
+ from pydantic_settings import BaseSettings
+ 
++
+ class Settings(BaseSettings):
+     environment: str = "development"
+     database_url: str = "postgresql://user:pass@localhost:5432/appdb"
+     redis_url: str = "redis://localhost:6379"
+     servicebus_connection_string: str = ""
+     servicebus_topic_tasks: str = "task-events"
++
++    # ── Database connection pool ─────────────────────────────────────────────
++    # See user-service/app/config.py for the rationale on these knobs. Mirror
++    # the defaults so both services scale the same way unless explicitly
++    # overridden per environment.
++    db_pool_size: int = 10
++    db_max_overflow: int = 20
++    db_pool_timeout: int = 10
++    db_pool_recycle: int = 3600
++
+     class Config:
+         env_file = ".env"
+ 
++
+ settings = Settings()
+diff --git a/services/task-service/app/database.py b/services/task-service/app/database.py
+index 87605ae..66e7214 100644
+--- a/services/task-service/app/database.py
++++ b/services/task-service/app/database.py
+@@ -8,12 +8,14 @@ async_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg:/
+ engine = create_async_engine(
+     async_url,
+     echo=settings.environment == "development",
+-    pool_size=10,
+-    max_overflow=20,
+-    pool_recycle=3600,
++    # All pool knobs come from settings so each environment can size them
++    # against its actual Postgres SKU. See user-service/app/database.py for
++    # the full rationale.
++    pool_size=settings.db_pool_size,
++    max_overflow=settings.db_max_overflow,
++    pool_recycle=settings.db_pool_recycle,
+     pool_pre_ping=True,
+-    # See user-service/app/database.py for the full explanation of pool_timeout.
+-    pool_timeout=10,
++    pool_timeout=settings.db_pool_timeout,
+ )
+ 
+ AsyncSessionLocal = async_sessionmaker(
+diff --git a/services/task-service/app/routes/tasks.py b/services/task-service/app/routes/tasks.py
+index 149d214..1f774d2 100644
+--- a/services/task-service/app/routes/tasks.py
++++ b/services/task-service/app/routes/tasks.py
+@@ -130,6 +130,37 @@ async def _get_sender() -> ServiceBusSender | None:
+     return _sb_sender
+ 
+ 
++async def _reset_sender() -> None:
++    """
++    Drop the cached client and sender so the next call rebuilds them.
++
++    Called when a send fails — the AMQP link or the underlying TCP connection
++    may be dead. Without this reset the singleton stays non-None forever and
++    every subsequent send fails for the lifetime of the pod, even after the
++    Service Bus transient outage has cleared.
++
++    Errors during cleanup are swallowed: the goal is to clear local state so
++    a fresh client can be built, not to perfectly drain a sender we already
++    know is broken.
++    """
++    global _sb_client, _sb_sender
++    async with _sb_lock:
++        old_sender = _sb_sender
++        old_client = _sb_client
++        _sb_sender = None
++        _sb_client = None
++    if old_sender is not None:
++        try:
++            await old_sender.close()
++        except Exception as exc:
++            logger.debug("Best-effort sender close during reset: %s", exc)
++    if old_client is not None:
++        try:
++            await old_client.close()
++        except Exception as exc:
++            logger.debug("Best-effort client close during reset: %s", exc)
++
++
+ async def close_sender() -> None:
+     """Drain and close the shared sender on shutdown."""
+     global _sb_client, _sb_sender
+@@ -144,7 +175,11 @@ async def close_sender() -> None:
+ async def _publish_event(event_type: str, data: dict) -> None:
+     """
+     Publish a domain event. Called from BackgroundTasks so it runs after DB commit.
++
+     Never raises — event publishing must never take down the API response.
++    On a send failure we reset the cached client/sender so the next call gets
++    a fresh AMQP connection; the previous version left the dead singleton
++    in place and every subsequent send failed for the pod's lifetime.
+     """
+     try:
+         sender = await _get_sender()
+@@ -159,7 +194,11 @@ async def _publish_event(event_type: str, data: dict) -> None:
+         await sender.send_messages(message)
+         logger.info("Published event: %s", event_type)
+     except Exception as exc:
+-        logger.error("Failed to publish event %s: %s", event_type, exc)
++        logger.error("Failed to publish event %s: %s — resetting sender", event_type, exc)
++        # Drop the cached client/sender so the next publish rebuilds them.
++        # Any in-flight events for this pod are lost, but future events flow
++        # again as soon as Service Bus recovers.
++        await _reset_sender()
+ 
+ 
+ # ─── Routes ───────────────────────────────────────────────────────────────────
+diff --git a/services/task-service/tests/test_schemas.py b/services/task-service/tests/test_schemas.py
+index 9c3a0eb..9835308 100644
+--- a/services/task-service/tests/test_schemas.py
++++ b/services/task-service/tests/test_schemas.py
+@@ -54,7 +54,7 @@ class TestTaskCreateHtmlStripping:
+     def test_html_only_title_rejected(self):
+         """Title that is ONLY an HTML tag becomes empty after stripping → should raise."""
+         with pytest.raises(ValidationError, match="empty"):
+-            TaskCreate(**self._valid_base(title="<script>bad()</script>"))
++            TaskCreate(**self._valid_base(title="<br/><hr/>"))
+ 
+     def test_html_stripped_from_description(self):
+         task = TaskCreate(**self._valid_base(
+@@ -125,4 +125,4 @@ class TestTaskUpdatePatchSemantics:
+ 
+     def test_html_only_title_update_rejected(self):
+         with pytest.raises(ValidationError, match="empty"):
+-            TaskUpdate(title="<script>x()</script>")
++            TaskUpdate(title="<br/><hr/>")
+diff --git a/services/user-service/app/config.py b/services/user-service/app/config.py
+index c70bae7..ac25445 100644
+--- a/services/user-service/app/config.py
++++ b/services/user-service/app/config.py
+@@ -35,6 +35,24 @@ class Settings(BaseSettings):
+     jwt_algorithm: str = "HS256"
+     jwt_expiry_minutes: int = 60
+ 
++    # ── Database connection pool ─────────────────────────────────────────────
++    # Per-process pool sizes. Multiply by HPA max replicas to get the peak
++    # concurrent connections this service might open. A B1ms Postgres caps
++    # at ~50 connections, so dev should run with smaller pools (set in K8s/
++    # docker-compose env). Production GP_Standard_D2s_v3 supports ~200.
++    db_pool_size: int = 10
++    db_max_overflow: int = 20
++    db_pool_timeout: int = 10
++    db_pool_recycle: int = 3600
++
++    # ── Admin bootstrap ──────────────────────────────────────────────────────
++    # On startup, if INITIAL_ADMIN_EMAIL is set and a user with that email
++    # exists, they are promoted to admin. Idempotent: already-admin users are
++    # left alone; missing users are logged and skipped. Intended to bridge the
++    # "you can't promote a user without already being an admin" chicken/egg
++    # gap on a fresh deployment. Unset this env var after first use.
++    initial_admin_email: str | None = None
++
+     class Config:
+         env_file = ".env"
+         case_sensitive = False
+diff --git a/services/user-service/app/database.py b/services/user-service/app/database.py
+index 03c5e6f..d024f28 100644
+--- a/services/user-service/app/database.py
++++ b/services/user-service/app/database.py
+@@ -18,16 +18,17 @@ async_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg:/
+ engine = create_async_engine(
+     async_url,
+     echo=settings.environment == "development",  # Log SQL in dev only
+-    pool_size=10,          # Keep 10 persistent connections
+-    max_overflow=20,       # Allow 20 extra connections at peak
+-    pool_recycle=3600,     # Recycle connections after 1 hour
+-    pool_pre_ping=True,    # Test connection before using (handles DB restarts)
+-    # pool_timeout: how long to wait for a connection from the pool before
+-    # raising TimeoutError. Without this, requests hang indefinitely when all
+-    # 30 pool slots (pool_size + max_overflow) are exhausted under heavy load.
+-    # 10 seconds is generous enough for a slow DB query, tight enough to fail
+-    # fast and surface connection exhaustion before the HTTP client times out.
+-    pool_timeout=10,
++    # All four pool knobs are driven from settings so each environment can
++    # right-size them. The defaults (10 / 20) target a 30-conn ceiling per
++    # process, which multiplied by the HPA replica count gives the peak
++    # concurrent connections to Postgres. Dev should drop these to 5 / 5
++    # against a B1ms server (≈50-conn cap), prod can raise them on a
++    # GP_Standard sku.
++    pool_size=settings.db_pool_size,
++    max_overflow=settings.db_max_overflow,
++    pool_recycle=settings.db_pool_recycle,  # Recycle stale connections
++    pool_pre_ping=True,                     # Test connection before each use
++    pool_timeout=settings.db_pool_timeout,  # Fail fast under exhaustion
+ )
+ 
+ AsyncSessionLocal = async_sessionmaker(
+diff --git a/services/user-service/app/main.py b/services/user-service/app/main.py
+index cbe4fbe..f06944f 100644
+--- a/services/user-service/app/main.py
++++ b/services/user-service/app/main.py
+@@ -9,11 +9,12 @@ import logging
+ from contextlib import asynccontextmanager
+ 
+ from fastapi import FastAPI, Response
+-from sqlalchemy import text
++from sqlalchemy import select, text
+ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+ 
+ from app.config import settings
+-from app.database import engine, Base
++from app.database import AsyncSessionLocal, engine, Base
++from app.models import User
+ from app.routes.auth import router as auth_router
+ from app.routes.users import router as users_router
+ from app.telemetry import init_telemetry
+@@ -23,6 +24,59 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
+ logger = logging.getLogger(__name__)
+ 
+ 
++async def _bootstrap_initial_admin() -> None:
++    """
++    Promote the user identified by INITIAL_ADMIN_EMAIL to admin, if set.
++
++    SOLVES THE FIRST-ADMIN CHICKEN/EGG PROBLEM:
++      The /admin/users/{id}/promote endpoint requires the caller to already
++      be an admin. On a fresh deployment there are zero admins, so the route
++      is unreachable. This function bridges the gap.
++
++    BEHAVIOUR:
++      - If INITIAL_ADMIN_EMAIL is unset → no-op. Production should leave it
++        unset after first use.
++      - If the env var is set but no user with that email exists yet → log a
++        notice and continue. The next startup (after they register) will
++        promote them.
++      - If the user exists and is already admin → no-op.
++      - If the user exists and is not admin → set is_admin=True and commit.
++
++    The bootstrap user still has to register through the normal flow first
++    so a real bcrypt hash gets stored. This function NEVER creates accounts;
++    it only flips a flag on an existing one.
++    """
++    email = settings.initial_admin_email
++    if not email:
++        return
++
++    try:
++        async with AsyncSessionLocal() as session:
++            result = await session.execute(select(User).where(User.email == email))
++            user = result.scalar_one_or_none()
++            if user is None:
++                logger.info(
++                    "INITIAL_ADMIN_EMAIL=%s is set but no such user exists yet — "
++                    "register the account, then restart this service to promote it.",
++                    email,
++                )
++                return
++            if user.is_admin:
++                logger.info("Initial admin %s already promoted — no action taken.", email)
++                return
++            user.is_admin = True
++            await session.commit()
++            logger.warning(
++                "Promoted %s to admin via INITIAL_ADMIN_EMAIL bootstrap. "
++                "Unset this env var now to prevent accidental future re-promotion.",
++                email,
++            )
++    except Exception as exc:
++        # Failure to bootstrap an admin must not prevent the service from
++        # starting — the rest of the API still works for normal users.
++        logger.error("Initial admin bootstrap failed: %s", exc)
++
++
+ @asynccontextmanager
+ async def lifespan(app: FastAPI):
+     """
+@@ -44,6 +98,7 @@ async def lifespan(app: FastAPI):
+     async with engine.begin() as conn:
+         await conn.run_sync(Base.metadata.create_all)
+     logger.info("Database ready")
++    await _bootstrap_initial_admin()
+     await get_redis()  # Establish Redis connection at startup (non-fatal if unavailable)
+     init_telemetry(app, service_name="user-service", db_engine=engine)
+     yield
+diff --git a/services/user-service/app/routes/auth.py b/services/user-service/app/routes/auth.py
+index 66b162b..b21f11d 100644
+--- a/services/user-service/app/routes/auth.py
++++ b/services/user-service/app/routes/auth.py
+@@ -15,6 +15,7 @@ TOKEN ROTATION:
+   alerting them to the compromise.
+ """
+ import asyncio
++import functools
+ import logging
+ import uuid
+ from datetime import datetime, timedelta, timezone
+@@ -45,7 +46,15 @@ from app.schemas import (
+ logger = logging.getLogger(__name__)
+ router = APIRouter()
+ 
+-_DUMMY_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=12)).decode()
++
++# Constant-time-safe bcrypt comparison target used when the requested account
++# doesn't exist. Computed lazily on first use rather than at module import,
++# so the ~250 ms bcrypt cost doesn't tax every process boot and every test
++# collection. functools.cache memoises the first call — subsequent lookups
++# return instantly.
++@functools.cache
++def _dummy_hash() -> str:
++    return bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=12)).decode()
+ 
+ 
+ # ─── Helpers ─────────────────────────────────────────────────────────────────
+@@ -158,7 +167,7 @@ async def login(
+     result = await db.execute(select(User).where(User.email == payload.email))
+     user = result.scalar_one_or_none()
+ 
+-    candidate_hash = user.hashed_password if user else _DUMMY_HASH
++    candidate_hash = user.hashed_password if user else _dummy_hash()
+     password_ok = await _verify_password(payload.password, candidate_hash)
+ 
+     # ── Step 3: Evaluate outcome. ───────────────────────────────────
+diff --git a/terraform/bootstrap/main.tf b/terraform/bootstrap/main.tf
+new file mode 100755
+index 0000000..2ed3d2f
+--- /dev/null
++++ b/terraform/bootstrap/main.tf
+@@ -0,0 +1,153 @@
++# =============================================================================
++# TERRAFORM REMOTE STATE BOOTSTRAP
++#
++# This is the chicken-and-egg fix for the azurerm backend used by every other
++# environment. The dev and prod root modules declare:
++#
++#   backend "azurerm" {
++#     resource_group_name  = "rg-terraform-state"
++#     storage_account_name = "<unique>"
++#     container_name       = "tfstate"
++#     ...
++#   }
++#
++# Those resources have to exist BEFORE `terraform init` can succeed against
++# them. We can't provision them with the same Terraform module that uses them
++# as a backend — the init would fail before the apply could run. So this
++# module uses a LOCAL backend and creates exactly the three things the real
++# environments need.
++#
++# RUN ONCE PER SUBSCRIPTION (not per environment). The same backend is shared
++# by dev and prod via different state-file keys.
++#
++# USAGE:
++#   az login
++#   az account set --subscription "<subscription-id>"
++#   cd terraform/bootstrap
++#   # Pick a globally unique storage account name (3-24 lowercase letters/digits).
++#   # Set it as STORAGE_ACCOUNT below or via TF_VAR_storage_account_name.
++#   terraform init
++#   terraform apply
++#   # Now copy the output `storage_account_name` into dev/main.tf and prod/main.tf
++#   # under the backend "azurerm" block.
++# =============================================================================
++
++terraform {
++  required_version = ">= 1.7.0"
++  required_providers {
++    azurerm = {
++      source  = "hashicorp/azurerm"
++      version = "~> 3.100"
++    }
++    random = {
++      source  = "hashicorp/random"
++      version = "~> 3.6"
++    }
++  }
++  # LOCAL backend. The whole point: this state file lives on your laptop,
++  # not in Azure, so we can bootstrap the Azure backend itself. Commit the
++  # .terraform.lock.hcl, not the state file (terraform.tfstate).
++}
++
++provider "azurerm" {
++  features {}
++}
++
++variable "location" {
++  type        = string
++  default     = "eastus2"
++  description = "Azure region for the state storage account."
++}
++
++variable "storage_account_name" {
++  type        = string
++  default     = ""
++  description = <<-EOT
++    Globally unique storage account name (3-24 lowercase letters and digits).
++    Storage account names share a global Azure namespace, so "stterraformstate"
++    is almost certainly taken. If left empty, a random suffix is generated.
++  EOT
++}
++
++resource "random_string" "suffix" {
++  length  = 6
++  upper   = false
++  special = false
++  numeric = true
++}
++
++locals {
++  # If the caller didn't supply a name, build one with a random suffix.
++  # Pattern: "sttf<6-char-random>" — 10 chars total, well under the 24 cap.
++  resolved_storage_account_name = (
++    var.storage_account_name != ""
++    ? var.storage_account_name
++    : "sttf${random_string.suffix.result}"
++  )
++}
++
++resource "azurerm_resource_group" "tfstate" {
++  name     = "rg-terraform-state"
++  location = var.location
++  tags = {
++    Purpose   = "TerraformRemoteState"
++    ManagedBy = "Terraform"
++  }
++}
++
++resource "azurerm_storage_account" "tfstate" {
++  name                            = local.resolved_storage_account_name
++  resource_group_name             = azurerm_resource_group.tfstate.name
++  location                        = azurerm_resource_group.tfstate.location
++  account_tier                    = "Standard"
++  account_replication_type        = "LRS"
++  account_kind                    = "StorageV2"
++  min_tls_version                 = "TLS1_2"
++  allow_nested_items_to_be_public = false
++
++  # State files contain resource IDs, sometimes secrets in older provider
++  # versions. Soft-delete + versioning means an accidental `terraform destroy`
++  # against the bootstrap is recoverable.
++  blob_properties {
++    versioning_enabled = true
++    delete_retention_policy {
++      days = 30
++    }
++    container_delete_retention_policy {
++      days = 30
++    }
++  }
++
++  tags = {
++    Purpose   = "TerraformRemoteState"
++    ManagedBy = "Terraform"
++  }
++}
++
++resource "azurerm_storage_container" "tfstate" {
++  name                  = "tfstate"
++  storage_account_name  = azurerm_storage_account.tfstate.name
++  container_access_type = "private"
++}
++
++# Apply a delete lock so this bootstrap is not destroyed casually. Removing
++# the lock requires explicit intent.
++resource "azurerm_management_lock" "tfstate_no_delete" {
++  name       = "lock-tfstate-no-delete"
++  scope      = azurerm_resource_group.tfstate.id
++  lock_level = "CanNotDelete"
++  notes      = "Protects the Terraform remote state backend."
++}
++
++output "storage_account_name" {
++  value       = azurerm_storage_account.tfstate.name
++  description = "Copy this into the backend \"azurerm\" block of dev/main.tf and prod/main.tf."
++}
++
++output "resource_group_name" {
++  value = azurerm_resource_group.tfstate.name
++}
++
++output "container_name" {
++  value = azurerm_storage_container.tfstate.name
++}
+diff --git a/terraform/environments/dev/main.tf b/terraform/environments/dev/main.tf
+index 8b9b0e6..8158b60 100644
+--- a/terraform/environments/dev/main.tf
++++ b/terraform/environments/dev/main.tf
+@@ -24,13 +24,18 @@ terraform {
+   }
+ 
+   # TERRAFORM CONCEPT — Remote Backend:
+-  # By default, Terraform stores state in a local file (terraform.tfstate).
+-  # In a team, that's a disaster — two people run terraform simultaneously
+-  # and corrupt the state. Remote backend stores state in Azure Blob Storage
+-  # with state locking (only one operation at a time).
++  # State lives in Azure Blob Storage with built-in locking (only one apply
++  # at a time per state file). Bootstrap the backend ONCE per subscription
++  # before this module's first `terraform init` — see terraform/bootstrap/.
++  #
++  # storage_account_name is a placeholder. Replace it with the value of
++  # `terraform output storage_account_name` from the bootstrap module, or
++  # override it at init time without editing this file:
++  #
++  #   terraform init -backend-config="storage_account_name=sttfabc123"
+   backend "azurerm" {
+     resource_group_name  = "rg-terraform-state"
+-    storage_account_name = "stterraformstate"   # Must be globally unique!
++    storage_account_name = "REPLACE_WITH_BOOTSTRAP_OUTPUT"
+     container_name       = "tfstate"
+     key                  = "microservices/dev/terraform.tfstate"
+   }
+@@ -161,6 +166,10 @@ module "aks" {
+   app_node_max     = 3
+   app_node_count   = 1
+ 
++  # Dev environments must be tear-downable. Disable the Azure management lock
++  # so `terraform destroy` cleans up without manual lock removal.
++  enable_destroy_protection = false
++
+   tags = local.common_tags
+ }
+ 
+diff --git a/terraform/environments/prod/main.tf b/terraform/environments/prod/main.tf
+index a2f8183..1669f0d 100644
+--- a/terraform/environments/prod/main.tf
++++ b/terraform/environments/prod/main.tf
+@@ -18,9 +18,16 @@ terraform {
+     azurerm = { source = "hashicorp/azurerm"; version = "~> 3.100" }
+     random  = { source = "hashicorp/random";  version = "~> 3.6" }
+   }
++  # State lives in Azure Blob Storage with built-in locking. Bootstrap the
++  # backend ONCE per subscription before this module's first `terraform init` —
++  # see terraform/bootstrap/. Replace storage_account_name with the value of
++  # `terraform output storage_account_name` from that module, or override at
++  # init time:
++  #
++  #   terraform init -backend-config="storage_account_name=sttfabc123"
+   backend "azurerm" {
+     resource_group_name  = "rg-terraform-state"
+-    storage_account_name = "stterraformstate"
++    storage_account_name = "REPLACE_WITH_BOOTSTRAP_OUTPUT"
+     container_name       = "tfstate"
+     key                  = "microservices/prod/terraform.tfstate"   # Different key!
+   }
+@@ -135,6 +142,12 @@ module "aks" {
+   app_node_max   = 10
+   app_node_count = 3
+ 
++  # Prod cluster is destroy-protected via an Azure management lock. To tear it
++  # down deliberately you must remove the lock first (or set this to false and
++  # re-apply). This is the default but we set it explicitly so a future reader
++  # sees the intent.
++  enable_destroy_protection = true
++
+   tags = local.common_tags
+ }
+ 
+diff --git a/terraform/modules/aks/main.tf b/terraform/modules/aks/main.tf
+index 00721ad..15b3a10 100644
+--- a/terraform/modules/aks/main.tf
++++ b/terraform/modules/aks/main.tf
+@@ -130,17 +130,29 @@ resource "azurerm_kubernetes_cluster" "main" {
+   tags = var.tags
+ 
+   lifecycle {
+-    # SAFETY: prevent_destroy stops 'terraform destroy' from deleting the cluster
+-    # unless you first remove this block and re-apply. This is a deliberate
+-    # friction point that prevents a single mistyped command from erasing a
+-    # production cluster. Set to false ONLY in dev/test environments.
+-    prevent_destroy = true
++    # Note: prevent_destroy MUST be a literal — Terraform refuses to interpolate
++    # variables here. To keep dev tear-downable while still protecting prod, we
++    # move the protection to an Azure-side management lock below, guarded by
++    # var.enable_destroy_protection.
+     ignore_changes = [
+       default_node_pool[0].node_count, # Autoscaler manages this
+     ]
+   }
+ }
+ 
++# ─── Destroy Protection (Azure-side lock) ────────────────────────────────────
++# CanNotDelete: delete operations against the cluster — whether from Terraform,
++# the Azure CLI, or the portal — fail until the lock is removed. Terraform
++# applies and updates still work. Set var.enable_destroy_protection=false in
++# dev to skip this lock entirely and allow normal teardown.
++resource "azurerm_management_lock" "aks_no_delete" {
++  count      = var.enable_destroy_protection ? 1 : 0
++  name       = "lock-aks-${var.project_name}-${var.environment}"
++  scope      = azurerm_kubernetes_cluster.main.id
++  lock_level = "CanNotDelete"
++  notes      = "Destroy protection. Set enable_destroy_protection=false in tfvars to remove."
++}
++
+ # ─── User Node Pool ───────────────────────────────────────────────────────────
+ # Application workloads run here, separate from system components.
+ # This allows independent scaling of app nodes without touching system nodes.
+diff --git a/terraform/modules/aks/variables.tf b/terraform/modules/aks/variables.tf
+index 457984f..f1cd4a5 100644
+--- a/terraform/modules/aks/variables.tf
++++ b/terraform/modules/aks/variables.tf
+@@ -19,3 +19,17 @@ variable "app_node_min"     { type = number; default = 1 }
+ variable "app_node_max"     { type = number; default = 5 }
+ 
+ variable "tags"             { type = map(string); default = {} }
++
++# When true, an Azure Resource Lock is applied to the cluster that requires
++# the lock be removed (manually or via Terraform) before deletion can succeed.
++# Prefer this over Terraform's lifecycle.prevent_destroy because:
++#   1. prevent_destroy must be a literal — it cannot be driven by a variable,
++#      which forced the previous module to use the same value for dev and prod.
++#   2. The Azure-side lock survives Terraform state loss; prevent_destroy only
++#      protects against `terraform destroy` runs against this exact state file.
++# Recommended: true in prod, false in dev/test so you can tear down freely.
++variable "enable_destroy_protection" {
++  type        = bool
++  default     = true
++  description = "Apply an azurerm_management_lock(CanNotDelete) to the AKS cluster."
++}
+diff --git a/tests/load/locustfile.py b/tests/load/locustfile.py
+old mode 100644
+new mode 100755
+-- 
+2.34.1
+

@@ -130,6 +130,37 @@ async def _get_sender() -> ServiceBusSender | None:
     return _sb_sender
 
 
+async def _reset_sender() -> None:
+    """
+    Drop the cached client and sender so the next call rebuilds them.
+
+    Called when a send fails — the AMQP link or the underlying TCP connection
+    may be dead. Without this reset the singleton stays non-None forever and
+    every subsequent send fails for the lifetime of the pod, even after the
+    Service Bus transient outage has cleared.
+
+    Errors during cleanup are swallowed: the goal is to clear local state so
+    a fresh client can be built, not to perfectly drain a sender we already
+    know is broken.
+    """
+    global _sb_client, _sb_sender
+    async with _sb_lock:
+        old_sender = _sb_sender
+        old_client = _sb_client
+        _sb_sender = None
+        _sb_client = None
+    if old_sender is not None:
+        try:
+            await old_sender.close()
+        except Exception as exc:
+            logger.debug("Best-effort sender close during reset: %s", exc)
+    if old_client is not None:
+        try:
+            await old_client.close()
+        except Exception as exc:
+            logger.debug("Best-effort client close during reset: %s", exc)
+
+
 async def close_sender() -> None:
     """Drain and close the shared sender on shutdown."""
     global _sb_client, _sb_sender
@@ -144,7 +175,11 @@ async def close_sender() -> None:
 async def _publish_event(event_type: str, data: dict) -> None:
     """
     Publish a domain event. Called from BackgroundTasks so it runs after DB commit.
+
     Never raises — event publishing must never take down the API response.
+    On a send failure we reset the cached client/sender so the next call gets
+    a fresh AMQP connection; the previous version left the dead singleton
+    in place and every subsequent send failed for the pod's lifetime.
     """
     try:
         sender = await _get_sender()
@@ -159,7 +194,11 @@ async def _publish_event(event_type: str, data: dict) -> None:
         await sender.send_messages(message)
         logger.info("Published event: %s", event_type)
     except Exception as exc:
-        logger.error("Failed to publish event %s: %s", event_type, exc)
+        logger.error("Failed to publish event %s: %s — resetting sender", event_type, exc)
+        # Drop the cached client/sender so the next publish rebuilds them.
+        # Any in-flight events for this pod are lost, but future events flow
+        # again as soon as Service Bus recovers.
+        await _reset_sender()
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────

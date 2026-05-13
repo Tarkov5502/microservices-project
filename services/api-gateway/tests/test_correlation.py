@@ -3,7 +3,7 @@ tests/test_correlation.py — Tests for the X-Request-ID correlation middleware.
 """
 import re
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from app.middleware.correlation import CorrelationMiddleware, _sanitize_or_generate
@@ -18,9 +18,11 @@ def client():
     app = FastAPI()
     app.add_middleware(CorrelationMiddleware)
 
+    # NB: `request: Request` MUST be annotated. Without the type annotation
+    # FastAPI treats the parameter as a request-body field and returns 422
+    # for any GET that doesn't include a body.
     @app.get("/ping")
-    async def ping(request):
-        from fastapi import Request
+    async def ping(request: Request):
         return {"request_id": request.state.request_id}
 
     return TestClient(app)

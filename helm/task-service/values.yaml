@@ -1,6 +1,6 @@
 replicaCount: 2
 image:
-  repository: REPLACE_ACR_LOGIN_SERVER/task-service
+  repository: ${ACR_LOGIN_SERVER}/task-service
   pullPolicy: IfNotPresent
   tag: "latest"
 service:
@@ -15,7 +15,6 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 8
   targetCPUUtilizationPercentage: 70
-secretName: app-secrets
 env:
   ENVIRONMENT: production
   SERVICEBUS_TOPIC_TASKS: "task-events"

@@ -81,23 +81,23 @@ class TestHopByHopHeaders:
 class TestRouteResolution:
 
     def test_users_path_routes_to_user_service(self):
-        upstream, _ = _resolve_upstream("/api/v1/users/me")
+        upstream, _, _ = _resolve_upstream("/api/v1/users/me")
         assert "user-service" in upstream or "8001" in upstream
 
     def test_auth_path_routes_to_user_service(self):
-        upstream, _ = _resolve_upstream("/api/v1/auth/login")
+        upstream, _, _ = _resolve_upstream("/api/v1/auth/login")
         assert "user-service" in upstream or "8001" in upstream
 
     def test_tasks_path_routes_to_task_service(self):
-        upstream, _ = _resolve_upstream("/api/v1/tasks")
+        upstream, _, _ = _resolve_upstream("/api/v1/tasks")
         assert "task-service" in upstream or "8002" in upstream
 
     def test_projects_path_routes_to_task_service(self):
-        upstream, _ = _resolve_upstream("/api/v1/projects/abc")
+        upstream, _, _ = _resolve_upstream("/api/v1/projects/abc")
         assert "task-service" in upstream or "8002" in upstream
 
     def test_notifications_path_routes_to_notification_service(self):
-        upstream, _ = _resolve_upstream("/api/v1/notifications")
+        upstream, _, _ = _resolve_upstream("/api/v1/notifications")
         assert "notification-service" in upstream or "8003" in upstream
 
     def test_unknown_path_raises_404(self):

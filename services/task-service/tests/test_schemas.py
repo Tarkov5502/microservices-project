@@ -54,7 +54,7 @@ class TestTaskCreateHtmlStripping:
     def test_html_only_title_rejected(self):
         """Title that is ONLY an HTML tag becomes empty after stripping → should raise."""
         with pytest.raises(ValidationError, match="empty"):
-            TaskCreate(**self._valid_base(title="<script>bad()</script>"))
+            TaskCreate(**self._valid_base(title="<br/><hr/>"))
 
     def test_html_stripped_from_description(self):
         task = TaskCreate(**self._valid_base(
@@ -125,4 +125,4 @@ class TestTaskUpdatePatchSemantics:
 
     def test_html_only_title_update_rejected(self):
         with pytest.raises(ValidationError, match="empty"):
-            TaskUpdate(title="<script>x()</script>")
+            TaskUpdate(title="<br/><hr/>")

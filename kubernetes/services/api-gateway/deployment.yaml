@@ -76,8 +76,8 @@ spec:
 
       containers:
         - name: api-gateway
-          image: REPLACE_ACR_LOGIN_SERVER/api-gateway:latest
-          imagePullPolicy: Always
+          image: ${ACR_LOGIN_SERVER}/api-gateway:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
               name: http
@@ -110,11 +110,35 @@ spec:
               value: "http://task-service.microservices.svc.cluster.local:8002"
             - name: NOTIFICATION_SERVICE_URL
               value: "http://notification-service.microservices.svc.cluster.local:8003"
-            # JWT secret fetched from Kubernetes Secret (originally from Key Vault)
+
+            # CORS origins that the browser frontend is allowed to call from.
+            # MUST be set before any browser-based client will work. Defaults to
+            # empty (deny-all) so accidental missing-config doesn't expose CORS.
+            # Override per environment (comma-separated, no trailing slashes).
+            - name: ALLOWED_ORIGINS
+              value: ""
+
+            # Rate-limit budget per client IP per 60-s window.
+            - name: RATE_LIMIT_REQUESTS
+              value: "200"
+            - name: AUTH_RATE_LIMIT_REQUESTS
+              value: "20"
+
+            # Shared Redis used by the rate limiter so all gateway replicas
+            # see the same bucket. Fetched from the per-service Key Vault
+            # secret (synced by the Secret Store CSI driver).
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-gateway-kv-secrets
+                  key: redis-connection-string
+
+            # JWT secret — same key value as the user-service, fetched from
+            # the same Key Vault. Mismatched values silently reject every token.
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
+                  name: api-gateway-kv-secrets
                   key: jwt-secret
 
           # Liveness probe: if this fails, Kubernetes RESTARTS the container

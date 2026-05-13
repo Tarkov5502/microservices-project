@@ -24,13 +24,18 @@ terraform {
   }
 
   # TERRAFORM CONCEPT — Remote Backend:
-  # By default, Terraform stores state in a local file (terraform.tfstate).
-  # In a team, that's a disaster — two people run terraform simultaneously
-  # and corrupt the state. Remote backend stores state in Azure Blob Storage
-  # with state locking (only one operation at a time).
+  # State lives in Azure Blob Storage with built-in locking (only one apply
+  # at a time per state file). Bootstrap the backend ONCE per subscription
+  # before this module's first `terraform init` — see terraform/bootstrap/.
+  #
+  # storage_account_name is a placeholder. Replace it with the value of
+  # `terraform output storage_account_name` from the bootstrap module, or
+  # override it at init time without editing this file:
+  #
+  #   terraform init -backend-config="storage_account_name=sttfabc123"
   backend "azurerm" {
     resource_group_name  = "rg-terraform-state"
-    storage_account_name = "stterraformstate"   # Must be globally unique!
+    storage_account_name = "REPLACE_WITH_BOOTSTRAP_OUTPUT"
     container_name       = "tfstate"
     key                  = "microservices/dev/terraform.tfstate"
   }
@@ -160,6 +165,10 @@ module "aks" {
   app_node_min     = 1
   app_node_max     = 3
   app_node_count   = 1
+
+  # Dev environments must be tear-downable. Disable the Azure management lock
+  # so `terraform destroy` cleans up without manual lock removal.
+  enable_destroy_protection = false
 
   tags = local.common_tags
 }
