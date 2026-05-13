@@ -1,0 +1,1580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pod Tetris — pack the cluster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Lora:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+/*
+  POD TETRIS — a real bin-packing puzzle game that teaches the Kubernetes
+  scheduler by making you BE the Kubernetes scheduler.
+
+  Core loop:
+    1. A pod arrives in your queue with specific (CPU, memory) requirements.
+    2. You decide which node it lives on, by clicking the node.
+    3. Constraints (anti-affinity, taints, statefulness, priority) restrict
+       which nodes are valid.
+    4. Score for tight packing. Survive 10 waves of escalating difficulty.
+
+  Game design notes:
+    - Turn-based (no per-pod timer). The challenge is cognitive, not reflex.
+    - The "hold" slot (Tetris-inspired) gives strategic depth: stash a tricky
+      pod for a better moment.
+    - The next 3 pods are visible — plan a few moves ahead.
+    - Each wave introduces ONE new mechanic. You're never confused by two new
+      things at once.
+    - Lose condition: the current pod cannot fit ANYWHERE and hold can't save
+      you. Game over = your scheduler made an unrecoverable choice.
+
+  The lessons it teaches:
+    - Bin packing is genuinely hard (NP-complete in general).
+    - Anti-affinity prevents single points of failure (two replicas, one node,
+      one bad node = total outage).
+    - Taints reserve special hardware for the workloads that need it.
+    - Stateful pods can't be moved because their data is local.
+    - Priority + preemption lets critical workloads kick out optional ones.
+*/
+
+:root {
+  --bg-deep:    #0a141a;
+  --bg-mid:     #122530;
+  --bg-light:   #1a3142;
+  --line:       #2a4250;
+  --paper:      #fbf7ef;
+  --honey:      #fff5d6;
+  --gold:       #d4972f;
+  --gold-warm:  #e6b34d;
+  --green:      #4a9d6a;
+  --red:        #c45a4e;
+  --orange:     #e07b3a;
+  --cyan:       #5fb3c4;
+  --muted:      #6b7878;
+  --ink:        #2d3a3a;
+
+  --pod-web:     #e07b3a;
+  --pod-worker:  #c45a4e;
+  --pod-cache:   #5fb3c4;
+  --pod-db:      #9c6fc4;
+  --pod-batch:   #d4972f;
+  --pod-sidecar: #8aa0a8;
+
+  --shadow-soft: 0 1px 3px rgba(0,0,0,0.20), 0 6px 16px rgba(0,0,0,0.12);
+  --shadow-deep: 0 4px 8px rgba(0,0,0,0.25), 0 16px 40px rgba(0,0,0,0.18);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: radial-gradient(ellipse at center top, #142a35 0%, #0a141a 70%);
+  color: var(--honey);
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-size: 15px; line-height: 1.5;
+  user-select: none; -webkit-user-select: none;
+}
+
+/* ─── Layout shell ──────────────────────────────────────────────────────── */
+#shell {
+  position: relative;
+  width: 100vw; height: 100vh;
+  display: flex; flex-direction: column;
+  padding: 20px 28px 16px;
+}
+
+header.top {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 16px;
+}
+header.top .logo {
+  font-family: "Cinzel", serif; font-size: 20px; font-weight: 600;
+  letter-spacing: 0.1em; color: var(--gold-warm);
+}
+header.top .logo small {
+  font-family: "Inter", sans-serif; font-size: 12px; font-weight: 400;
+  color: var(--muted); margin-left: 12px; letter-spacing: 0;
+}
+header.top .stats {
+  display: flex; gap: 22px;
+}
+header.top .stat {
+  text-align: center;
+  font-family: "Cinzel", serif;
+}
+header.top .stat label {
+  display: block; font-size: 10px; letter-spacing: 0.15em;
+  color: var(--muted); text-transform: uppercase;
+  font-family: "Inter", sans-serif; font-weight: 500;
+}
+header.top .stat .val {
+  font-size: 22px; font-weight: 600;
+  color: var(--gold-warm); font-variant-numeric: tabular-nums;
+}
+header.top .stat.score .val { color: var(--honey); }
+header.top .stat.combo .val { color: var(--orange); }
+header.top .stat.combo .val.zero { color: var(--muted); }
+
+header.top a.back {
+  color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 4px;
+}
+header.top a.back:hover { color: var(--honey); border-color: var(--gold); }
+
+/* ─── Main play area ────────────────────────────────────────────────────── */
+main {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 180px 1fr 180px;
+  gap: 24px;
+  overflow: hidden;
+}
+
+#queue-panel, #hold-panel {
+  display: flex; flex-direction: column;
+  background: rgba(26, 49, 66, 0.4);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 14px;
+}
+.panel-label {
+  font-family: "Cinzel", serif;
+  font-size: 12px; letter-spacing: 0.18em;
+  color: var(--gold-warm); text-transform: uppercase;
+  text-align: center; padding-bottom: 12px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.panel-label small { display: block; font-family: "Inter", sans-serif; font-size: 10px; color: var(--muted); letter-spacing: 0.05em; margin-top: 2px; text-transform: none; }
+
+#queue {
+  flex: 1;
+  display: flex; flex-direction: column; gap: 10px;
+  overflow: hidden;
+}
+#queue .pod-card {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s;
+}
+#queue .pod-card.current {
+  transform: scale(1.05);
+  filter: drop-shadow(0 0 12px rgba(212, 151, 47, 0.4));
+}
+#queue .pod-card.next { opacity: 0.7; }
+#queue .pod-card.future { opacity: 0.4; }
+#queue .pod-card.placed-anim {
+  transform: scale(0.4) translateX(80px);
+  opacity: 0;
+}
+
+#hold {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+}
+#hold .pod-card { cursor: pointer; }
+#hold .empty-text {
+  color: var(--muted); font-size: 12px; text-align: center; padding: 30px 12px;
+  font-style: italic;
+}
+#hold-key {
+  margin-top: auto;
+  text-align: center; font-size: 11px; color: var(--muted);
+  padding: 8px; border-top: 1px solid var(--line);
+}
+#hold-key b { color: var(--gold-warm); font-family: "JetBrains Mono", monospace; }
+
+/* ─── Pod card visual ───────────────────────────────────────────────────── */
+.pod-card {
+  position: relative;
+  background: var(--bg-light);
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: default;
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.pod-card .row-top {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.pod-card .name {
+  font-family: "JetBrains Mono", monospace; font-size: 12px; font-weight: 500;
+  color: var(--honey);
+}
+.pod-card .badges {
+  display: flex; gap: 3px;
+}
+.pod-card .badge {
+  font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  background: rgba(0,0,0,0.3);
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: 0.04em;
+}
+.pod-card .badge.gpu       { background: rgba(212, 151, 47, 0.25); color: var(--gold-warm); }
+.pod-card .badge.stateful  { background: rgba(95, 179, 196, 0.25); color: var(--cyan); }
+.pod-card .badge.priority  { background: rgba(196, 90, 78, 0.3); color: #ffa49b; animation: glow-prio 1.4s ease-in-out infinite; }
+.pod-card .badge.affinity  { background: rgba(156, 111, 196, 0.25); color: #c2a4e0; }
+@keyframes glow-prio { 50% { box-shadow: 0 0 8px rgba(196, 90, 78, 0.6); } }
+
+.pod-shape {
+  display: flex; justify-content: center; padding: 6px 0;
+}
+.pod-shape svg { display: block; }
+
+.pod-card .resources {
+  display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 4px;
+}
+.pod-card .res {
+  font-family: "JetBrains Mono", monospace; font-size: 11px;
+  background: rgba(0,0,0,0.3);
+  padding: 2px 8px; border-radius: 3px;
+  color: var(--honey);
+}
+.pod-card .res b { color: var(--gold-warm); font-weight: 600; }
+
+/* ─── Nodes (the board) ─────────────────────────────────────────────────── */
+#board {
+  display: flex; gap: 16px; align-items: stretch; justify-content: center;
+  padding: 8px; min-height: 0;
+  overflow-x: auto;
+}
+
+.node {
+  flex: 1; min-width: 160px; max-width: 220px;
+  background: var(--bg-mid);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 14px 12px;
+  display: flex; flex-direction: column;
+  position: relative;
+  transition: border-color 0.2s, background 0.2s, transform 0.2s;
+  box-shadow: var(--shadow-soft);
+}
+.node[data-can-place="yes"] { border-color: var(--green); background: rgba(74, 157, 106, 0.10); cursor: pointer; }
+.node[data-can-place="no"]  { opacity: 0.5; }
+.node.full { border-color: var(--gold); background: rgba(212, 151, 47, 0.10); }
+.node.perfect { animation: perfectGlow 1s ease-out; }
+@keyframes perfectGlow { 0% { box-shadow: 0 0 0 0 rgba(212, 151, 47, 0.6); } 70% { box-shadow: 0 0 0 16px rgba(212, 151, 47, 0); } 100% { box-shadow: var(--shadow-soft); } }
+.node.invalid-shake { animation: invalidShake 0.4s; }
+@keyframes invalidShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+
+.node header {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+}
+.node header .name {
+  font-family: "Cinzel", serif; font-size: 15px; letter-spacing: 0.04em;
+  color: var(--honey);
+}
+.node header .key {
+  width: 22px; height: 22px;
+  background: var(--bg-deep); border: 1px solid var(--line); border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--gold-warm);
+}
+.node .taint-tag {
+  display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  font-family: "JetBrains Mono", monospace; letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  background: rgba(212, 151, 47, 0.18); color: var(--gold-warm);
+}
+
+.cap-bars { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.cap-bar {
+  display: flex; align-items: center; gap: 6px;
+  font-family: "JetBrains Mono", monospace; font-size: 11px;
+}
+.cap-bar label { width: 28px; color: var(--muted); }
+.cap-bar .bar {
+  flex: 1; height: 10px; background: rgba(0,0,0,0.4);
+  border-radius: 4px; overflow: hidden; position: relative;
+}
+.cap-bar .bar .fill {
+  height: 100%; background: var(--green);
+  transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s;
+  border-radius: 3px;
+}
+.cap-bar .bar .fill.medium { background: var(--gold); }
+.cap-bar .bar .fill.high   { background: var(--orange); }
+.cap-bar .bar .fill.full   { background: var(--gold-warm); }
+.cap-bar .num { width: 38px; color: var(--honey); text-align: right; }
+.cap-bar .ghost {
+  position: absolute; left: 0; top: 0; height: 100%;
+  background: rgba(255, 255, 255, 0.18); pointer-events: none;
+  transition: width 0.15s, opacity 0.15s;
+}
+
+.node .pods-here {
+  flex: 1; min-height: 60px;
+  display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start;
+}
+.node .pod-mini {
+  position: relative;
+  width: 36px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: default;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.node .pod-mini.entering {
+  animation: podEnter 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes podEnter {
+  0% { transform: scale(0) rotate(-20deg); opacity: 0; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+.node .pod-mini svg { display: block; width: 100%; height: 100%; }
+.node .pod-mini .mini-label {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "JetBrains Mono", monospace; font-size: 10px;
+  color: rgba(0, 0, 0, 0.7); font-weight: 600;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.3);
+}
+.node .pod-mini.stateful::after {
+  content: "🔒"; position: absolute; top: -2px; right: -2px;
+  font-size: 9px;
+}
+
+.node .empty-text {
+  text-align: center; color: var(--muted); font-size: 11px;
+  padding: 12px 0; opacity: 0.6;
+}
+
+.node .invalid-tooltip {
+  position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+  background: rgba(196, 90, 78, 0.95); color: white;
+  font-size: 11px; padding: 4px 10px; border-radius: 4px;
+  font-family: "JetBrains Mono", monospace;
+  white-space: nowrap; pointer-events: none;
+  opacity: 0; transition: opacity 0.15s;
+}
+.node[data-can-place="no"]:hover .invalid-tooltip { opacity: 1; }
+
+/* Preempt mode — node shows clickable pods to evict */
+.node.preempt-target { border-color: var(--red); background: rgba(196, 90, 78, 0.12); }
+.node.preempt-target .pod-mini.evictable { cursor: pointer; transition: transform 0.15s; }
+.node.preempt-target .pod-mini.evictable:hover { transform: scale(1.2); filter: drop-shadow(0 0 6px var(--red)); }
+
+/* ─── Footer / message bar ─────────────────────────────────────────────── */
+footer.bottom {
+  margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+}
+footer.bottom #message {
+  flex: 1;
+  font-size: 14px; color: var(--honey); opacity: 0.85;
+  font-family: "Lora", serif; font-style: italic;
+  min-height: 20px;
+}
+footer.bottom #controls-hint {
+  font-size: 12px; color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+}
+footer.bottom #controls-hint b { color: var(--gold-warm); }
+
+/* ─── Floating score popups ─────────────────────────────────────────────── */
+.floating-score {
+  position: fixed; pointer-events: none; z-index: 50;
+  font-family: "Cinzel", serif; font-size: 22px; font-weight: 600;
+  color: var(--gold-warm);
+  text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  animation: floatUp 1.4s ease-out forwards;
+}
+.floating-score.combo { color: var(--orange); }
+.floating-score.perfect { color: var(--gold-warm); font-size: 28px; }
+.floating-score.invalid { color: var(--red); }
+@keyframes floatUp {
+  0%   { transform: translateY(0) scale(0.6); opacity: 0; }
+  20%  { transform: translateY(-20px) scale(1.1); opacity: 1; }
+  100% { transform: translateY(-80px) scale(0.9); opacity: 0; }
+}
+
+/* ─── Screens (title, wave-clear, game-over) ────────────────────────────── */
+.screen {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(10, 20, 26, 0.96);
+  z-index: 100; padding: 40px;
+  text-align: center;
+}
+.screen .back-link {
+  position: absolute; top: 18px; left: 22px;
+  color: var(--muted); text-decoration: none; font-size: 13px;
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px;
+}
+.screen .back-link:hover { color: var(--honey); border-color: var(--gold); }
+.screen h1 {
+  font-family: "Cinzel", serif; font-size: 56px; font-weight: 700;
+  color: var(--gold-warm); letter-spacing: 0.1em; margin-bottom: 6px;
+  text-shadow: 0 0 30px rgba(212, 151, 47, 0.4);
+}
+.screen h2 {
+  font-family: "Lora", serif; font-size: 22px; font-weight: 500; font-style: italic;
+  color: var(--honey); opacity: 0.85; margin-bottom: 24px;
+}
+.screen p {
+  max-width: 580px; color: var(--honey); opacity: 0.85;
+  font-size: 15px; line-height: 1.7; margin-bottom: 16px;
+}
+.screen p b { color: var(--gold-warm); }
+.screen button {
+  font-family: "Cinzel", serif; font-size: 18px; font-weight: 600; letter-spacing: 0.08em;
+  padding: 12px 28px; margin: 6px;
+  background: var(--gold); color: var(--bg-deep);
+  border: none; border-radius: 6px; cursor: pointer;
+  box-shadow: 0 6px 20px rgba(212, 151, 47, 0.3);
+  transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.screen button:hover {
+  background: var(--gold-warm); transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(212, 151, 47, 0.45);
+}
+.screen button.ghost { background: transparent; color: var(--honey); border: 1px solid var(--line); box-shadow: none; }
+.screen button.ghost:hover { border-color: var(--gold); transform: none; box-shadow: none; }
+
+.screen .keys {
+  display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin: 18px 0 28px;
+}
+.screen .keys span {
+  background: var(--bg-mid); border: 1px solid var(--line);
+  padding: 8px 16px; border-radius: 4px;
+  font-family: "JetBrains Mono", monospace; font-size: 12px;
+}
+.screen .keys span b { color: var(--gold-warm); }
+.screen .best { color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 13px; margin-top: 20px; }
+
+.lesson-card {
+  max-width: 580px; margin: 20px 0 24px;
+  background: var(--bg-mid); border-left: 3px solid var(--gold);
+  padding: 18px 22px; border-radius: 0 6px 6px 0;
+  text-align: left; font-size: 14px; line-height: 1.7;
+}
+.lesson-card strong { color: var(--gold-warm); font-family: "Cinzel", serif; letter-spacing: 0.04em; }
+
+.run-stats {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 28px;
+  margin: 10px 0 24px; max-width: 480px;
+  font-family: "JetBrains Mono", monospace; font-size: 14px;
+}
+.run-stats span:nth-child(even) { color: var(--gold-warm); text-align: right; }
+
+/* ─── Tutorial banner ──────────────────────────────────────────────────── */
+#tutorial {
+  position: absolute; top: 76px; left: 50%; transform: translateX(-50%);
+  background: rgba(28, 49, 66, 0.96); border: 1px solid var(--gold);
+  padding: 12px 22px; border-radius: 8px;
+  max-width: 560px; text-align: center; font-size: 14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  pointer-events: none; z-index: 60;
+  animation: tutorialEnter 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes tutorialEnter { from { opacity: 0; transform: translate(-50%, -20px); } to { opacity: 1; transform: translate(-50%, 0); } }
+#tutorial.hidden { display: none; }
+#tutorial b { color: var(--gold-warm); }
+#tutorial em { font-style: normal; color: var(--cyan); }
+
+/* ─── Preempt mode prompt ──────────────────────────────────────────────── */
+#preempt-banner {
+  position: absolute; top: 76px; left: 50%; transform: translateX(-50%);
+  background: rgba(196, 90, 78, 0.96); color: white;
+  padding: 14px 24px; border-radius: 8px;
+  font-size: 14px; font-weight: 500; max-width: 560px; text-align: center;
+  box-shadow: 0 8px 32px rgba(196, 90, 78, 0.4);
+  z-index: 60;
+}
+#preempt-banner.hidden { display: none; }
+#preempt-banner b { font-weight: 700; }
+#preempt-banner button {
+  margin-left: 12px;
+  background: rgba(0,0,0,0.3); color: white; border: 1px solid white;
+  padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  main { grid-template-columns: 130px 1fr 130px; gap: 12px; }
+  header.top .stats { gap: 12px; }
+  header.top .stat .val { font-size: 18px; }
+  .node { padding: 10px; min-width: 130px; }
+}
+</style>
+</head>
+<body>
+
+<div id="shell">
+  <header class="top">
+    <div>
+      <a class="back" href="../">← Back</a>
+      <span class="logo" style="margin-left: 14px;">POD TETRIS <small>· pack the cluster</small></span>
+    </div>
+    <div class="stats">
+      <div class="stat"><label>Wave</label><div class="val"><span id="hud-wave">1</span>/10</div></div>
+      <div class="stat score"><label>Score</label><div class="val" id="hud-score">0</div></div>
+      <div class="stat combo"><label>Combo</label><div class="val zero" id="hud-combo">×1</div></div>
+      <div class="stat"><label>Placed</label><div class="val" id="hud-placed">0</div></div>
+    </div>
+  </header>
+
+  <main>
+    <aside id="queue-panel">
+      <div class="panel-label">Next up <small>top is current</small></div>
+      <div id="queue"></div>
+    </aside>
+
+    <section id="board"></section>
+
+    <aside id="hold-panel">
+      <div class="panel-label">Hold</div>
+      <div id="hold"><div class="empty-text">empty — press <b>space</b> to stash the current pod</div></div>
+      <div id="hold-key"><b>SPACE</b> swap</div>
+    </aside>
+  </main>
+
+  <footer class="bottom">
+    <div id="message">Click a node to place the highlighted pod.</div>
+    <div id="controls-hint">
+      <b>Click</b> node · <b>1-5</b> quick place · <b>Space</b> hold · <b>R</b> restart
+    </div>
+  </footer>
+</div>
+
+<div id="tutorial" class="hidden"></div>
+<div id="preempt-banner" class="hidden"></div>
+
+<!-- Title screen -->
+<div id="screen-title" class="screen">
+  <a href="../" class="back-link">← back to the arcade</a>
+  <h1>POD TETRIS</h1>
+  <h2>be the Kubernetes scheduler</h2>
+  <p>
+    Pods arrive needing homes. Each pod wants CPU and memory. Nodes have limited capacity.
+    Your job: <b>pack them in tight</b>. Pack tightly enough, survive 10 waves, you win.
+  </p>
+  <p>
+    Wave by wave you'll meet the real constraints the Kubernetes scheduler wrestles with:
+    <b>anti-affinity</b>, <b>taints</b>, <b>stateful workloads</b>, <b>priority and preemption</b>.
+    Each one a single new wrinkle you can absorb at your own pace.
+  </p>
+  <div class="keys">
+    <span><b>Click</b> node to place</span>
+    <span><b>1-5</b> quick place</span>
+    <span><b>Space</b> hold / swap</span>
+    <span><b>R</b> restart anytime</span>
+  </div>
+  <button id="btn-start">Begin Wave 1</button>
+  <div class="best" id="best-display"></div>
+</div>
+
+<!-- Wave-clear screen -->
+<div id="screen-wave-clear" class="screen" style="display:none;">
+  <h1 id="wave-clear-title">WAVE 1 CLEAR</h1>
+  <h2 id="wave-clear-sub">Onward.</h2>
+  <div class="run-stats" id="wave-stats"></div>
+  <div class="lesson-card" id="wave-lesson"></div>
+  <button id="btn-next-wave">Begin next wave →</button>
+</div>
+
+<!-- Game over screen -->
+<div id="screen-game-over" class="screen" style="display:none;">
+  <h1 id="over-title">GAME OVER</h1>
+  <h2 id="over-sub"></h2>
+  <div class="run-stats" id="over-stats"></div>
+  <div class="lesson-card" id="over-lesson"></div>
+  <button id="btn-retry">Try again</button>
+  <a href="../" class="back-link">← back</a>
+</div>
+
+<!-- Victory screen -->
+<div id="screen-victory" class="screen" style="display:none;">
+  <h1 style="color: var(--green);">VICTORY</h1>
+  <h2>You scheduled the cluster.</h2>
+  <div class="run-stats" id="victory-stats"></div>
+  <div class="lesson-card" id="victory-lesson"></div>
+  <button id="btn-victory-replay">Play again</button>
+  <a href="../" class="back-link">← back to arcade</a>
+</div>
+
+<script>
+"use strict";
+
+/* ═════════════════════════════════════════════════════════════════════════
+   POD TETRIS — implementation
+   ═════════════════════════════════════════════════════════════════════════ */
+
+const $ = sel => document.querySelector(sel);
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const shuffle = a => { a = a.slice(); for (let i = a.length-1; i > 0; i--) { const j = Math.floor(Math.random()*(i+1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+const choice = a => a[Math.floor(Math.random() * a.length)];
+
+/* ─── Audio (procedural Web Audio) ──────────────────────────────────────── */
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} }
+  return audioCtx;
+}
+function sfx(type) {
+  const ctx = ensureAudio(); if (!ctx) return;
+  const now = ctx.currentTime;
+  function tone(freq, dur, vol = 0.12, wave = "sine", attack = 0.005) {
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = wave; osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(vol, now + attack);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now); osc.stop(now + dur);
+  }
+  function noise(dur, vol = 0.06, filterFreq = 1200) {
+    const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random()*2 - 1) * (1 - i/data.length);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const filter = ctx.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = filterFreq;
+    const gain = ctx.createGain(); gain.gain.value = vol;
+    src.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+    src.start(now);
+  }
+  switch (type) {
+    case "place":    tone(660, 0.05, 0.10, "triangle"); tone(880, 0.04, 0.06); break;
+    case "tight":    tone(660, 0.06); tone(990, 0.10, 0.10); break;
+    case "perfect":  [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.20, 0.12), i*60)); break;
+    case "node-full": [523, 659, 784].forEach((f, i) => setTimeout(() => tone(f, 0.16, 0.14), i*70)); break;
+    case "invalid":  tone(180, 0.12, 0.14, "square"); break;
+    case "hold":     tone(440, 0.06); tone(330, 0.06); break;
+    case "wave-start": [392, 523, 659].forEach((f, i) => setTimeout(() => tone(f, 0.14, 0.12), i*80)); break;
+    case "wave-clear":[523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => tone(f, 0.22, 0.14), i*100)); break;
+    case "preempt":  tone(220, 0.20, 0.16, "sawtooth"); noise(0.15, 0.08, 800); break;
+    case "victory":  [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => setTimeout(() => tone(f, 0.28, 0.16), i*140)); break;
+    case "defeat":   tone(220, 0.5, 0.20, "sawtooth"); setTimeout(() => tone(165, 0.5, 0.18, "sawtooth"), 250); break;
+  }
+}
+
+/* ─── Pod & wave definitions ────────────────────────────────────────────────
+   Each pod type is a sensible workload. The (cpu, mem) profiles are chosen to
+   make placement decisions interesting — caches are memory-heavy, workers
+   are CPU-heavy, etc. Asymmetric resource needs mean you SHOULD mix workloads
+   on the same node for tight packing. Same workload type = wasted dimension. */
+const POD_TYPES = {
+  web:     { display: "web",       color: "var(--pod-web)",     hex: "#e07b3a",
+             cpu: [2],     mem: [2],     weight: 4 },
+  worker:  { display: "worker",    color: "var(--pod-worker)",  hex: "#c45a4e",
+             cpu: [3, 4],  mem: [1],     weight: 3 },
+  cache:   { display: "cache",     color: "var(--pod-cache)",   hex: "#5fb3c4",
+             cpu: [1],     mem: [3, 4],  weight: 3 },
+  db:      { display: "db",        color: "var(--pod-db)",      hex: "#9c6fc4",
+             cpu: [2, 3],  mem: [2, 3],  weight: 2, statefulChance: 1.0 },
+  batch:   { display: "batch",     color: "var(--pod-batch)",   hex: "#d4972f",
+             cpu: [4, 5],  mem: [2],     weight: 1 },
+  sidecar: { display: "sidecar",   color: "var(--pod-sidecar)", hex: "#8aa0a8",
+             cpu: [1],     mem: [1],     weight: 3 },
+};
+
+/* Wave definitions:
+   Each wave defines node config + pod sequence rules. We don't hand-author
+   every pod; we generate them with constraints applied so each playthrough
+   is a little different. */
+const WAVES = [
+  {
+    title: "Wave 1 · Basics",
+    intro: "<b>Wave 1.</b> Pods arrive. Each wants CPU and memory. Click a node to place. Pack tight for bonuses.",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+    ],
+    podCount: 9,
+    podTypes: ["web", "worker", "cache", "sidecar"],
+    addAffinity: false, addTaints: false, addStateful: false, addPriority: false,
+  },
+  {
+    title: "Wave 2 · Anti-affinity",
+    intro: "<b>Wave 2 · Anti-affinity.</b> Pods of the same <em>deployment</em> can't share a node — two replicas on one node would die together if it fails.",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+    ],
+    podCount: 11,
+    podTypes: ["web", "worker", "cache", "sidecar"],
+    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "billing", count: 2 }],
+  },
+  {
+    title: "Wave 3 · Taints",
+    intro: "<b>Wave 3 · Taints.</b> Some workloads need <em>special hardware</em>. GPU pods (gold) can only land on GPU-tainted nodes. Other pods can't.",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+      { id: 3, name: "gpu-1",  cpu: 8, mem: 8, taints: ["gpu"] },
+    ],
+    podCount: 13,
+    podTypes: ["web", "worker", "cache", "sidecar"],
+    addAffinity: true, affinityGroups: [{ label: "auth", count: 2 }],
+    addTaints: true, taintedPods: 3, // 3 gpu pods
+  },
+  {
+    title: "Wave 4 · Stateful",
+    intro: "<b>Wave 4 · Stateful.</b> Database pods carry data on disk. Once placed, they <em>cannot be moved</em> (preemption-immune).",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+      { id: 3, name: "gpu-1",  cpu: 8, mem: 8, taints: ["gpu"] },
+    ],
+    podCount: 15,
+    podTypes: ["web", "worker", "cache", "sidecar", "db"],
+    addAffinity: true, affinityGroups: [{ label: "auth", count: 2 }, { label: "api", count: 2 }],
+    addTaints: true, taintedPods: 3,
+    addStateful: true,
+  },
+  {
+    title: "Wave 5 · Priority & Preemption",
+    intro: "<b>Wave 5 · Priority.</b> Critical (red-glowing) pods can <em>evict</em> lower-priority neighbors if no space exists.",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+      { id: 3, name: "gpu-1",  cpu: 8, mem: 8, taints: ["gpu"] },
+    ],
+    podCount: 16,
+    podTypes: ["web", "worker", "cache", "sidecar", "db"],
+    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 2 }],
+    addTaints: true, taintedPods: 3,
+    addStateful: true,
+    addPriority: true, priorityPods: 2,
+  },
+  {
+    title: "Wave 6 · Mix",
+    intro: "<b>Wave 6.</b> All constraints active. The pace tightens.",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+      { id: 3, name: "node-4", cpu: 8, mem: 8, taints: [] },
+      { id: 4, name: "gpu-1",  cpu: 8, mem: 8, taints: ["gpu"] },
+    ],
+    podCount: 18,
+    podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
+    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }],
+    addTaints: true, taintedPods: 3,
+    addStateful: true,
+    addPriority: true, priorityPods: 1,
+  },
+  {
+    title: "Wave 7 · Bigger",
+    intro: "<b>Wave 7.</b> Bigger pods (batches) put pressure on capacity.",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+      { id: 3, name: "node-4", cpu: 8, mem: 8, taints: [] },
+      { id: 4, name: "gpu-1",  cpu: 8, mem: 8, taints: ["gpu"] },
+    ],
+    podCount: 20,
+    podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
+    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 2 }],
+    addTaints: true, taintedPods: 3,
+    addStateful: true,
+    addPriority: true, priorityPods: 1,
+  },
+  {
+    title: "Wave 8 · Tight",
+    intro: "<b>Wave 8.</b> Fewer nodes per pod. Margin for error is thin.",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+      { id: 3, name: "node-4", cpu: 8, mem: 8, taints: [] },
+      { id: 4, name: "gpu-1",  cpu: 8, mem: 8, taints: ["gpu"] },
+    ],
+    podCount: 22,
+    podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
+    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 2 }],
+    addTaints: true, taintedPods: 4,
+    addStateful: true,
+    addPriority: true, priorityPods: 2,
+  },
+  {
+    title: "Wave 9 · Pressure",
+    intro: "<b>Wave 9.</b> Heavy GPU load. Heavy state. One mistake and you're trapped.",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+      { id: 3, name: "node-4", cpu: 8, mem: 8, taints: [] },
+      { id: 4, name: "gpu-1",  cpu: 8, mem: 8, taints: ["gpu"] },
+      { id: 5, name: "gpu-2",  cpu: 8, mem: 8, taints: ["gpu"] },
+    ],
+    podCount: 24,
+    podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
+    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 3 }],
+    addTaints: true, taintedPods: 6,
+    addStateful: true,
+    addPriority: true, priorityPods: 2,
+  },
+  {
+    title: "Wave 10 · Final",
+    intro: "<b>Wave 10.</b> Everything. Survive 26 pods and you've earned it.",
+    nodes: () => [
+      { id: 0, name: "node-1", cpu: 8, mem: 8, taints: [] },
+      { id: 1, name: "node-2", cpu: 8, mem: 8, taints: [] },
+      { id: 2, name: "node-3", cpu: 8, mem: 8, taints: [] },
+      { id: 3, name: "node-4", cpu: 8, mem: 8, taints: [] },
+      { id: 4, name: "gpu-1",  cpu: 8, mem: 8, taints: ["gpu"] },
+      { id: 5, name: "gpu-2",  cpu: 8, mem: 8, taints: ["gpu"] },
+    ],
+    podCount: 26,
+    podTypes: ["web", "worker", "cache", "sidecar", "db", "batch"],
+    addAffinity: true, affinityGroups: [{ label: "auth", count: 3 }, { label: "api", count: 3 }, { label: "search", count: 3 }, { label: "ads", count: 2 }],
+    addTaints: true, taintedPods: 6,
+    addStateful: true,
+    addPriority: true, priorityPods: 3,
+  },
+];
+
+/* Wave-clear lesson cards */
+const WAVE_LESSONS = [
+  "<strong>Lesson · bin packing</strong><br>What you just did, the Kubernetes scheduler does. Every second. Across thousands of pods. The general problem is NP-complete — the scheduler uses smart heuristics, but it can't always be optimal. That's why <em>requests</em> matter: they're how YOU tell the scheduler what each pod actually needs.",
+  "<strong>Lesson · anti-affinity</strong><br>Two replicas of the same service on one node = a single bad node kills both. The <code>podAntiAffinity</code> rule says 'don't co-locate these'. In production, you'll see <code>topologyKey: kubernetes.io/hostname</code> for node-level spread, or <code>topology.kubernetes.io/zone</code> for AZ-level. The lesson: <em>diversity buys you survivability</em>.",
+  "<strong>Lesson · taints and tolerations</strong><br>Taints are a node's way of saying 'I'm picky — don't put just any pod here.' Tolerations are a pod's way of saying 'I accept your terms.' GPUs are the classic case (don't waste expensive hardware on web pods) but the pattern also covers spot/preemptible nodes, dedicated tenancy, hardware quirks.",
+  "<strong>Lesson · stateful workloads</strong><br>A stateful pod's data lives on a specific persistent volume attached to a specific node (or zone). You CAN'T just move it — the data wouldn't follow. This is why databases are scheduled with <code>StatefulSet</code> + PVC, not <code>Deployment</code>: the framework knows not to play musical chairs with your data.",
+  "<strong>Lesson · priority and preemption</strong><br>When critical work can't fit, Kubernetes can evict less-critical work to make room. Set with <code>priorityClassName</code>. Use cautiously: preemption is disruption. The right answer is usually 'have more capacity,' but for the case where a true emergency arrives, preemption is the release valve.",
+  "<strong>Lesson · the whole picture</strong><br>You're now juggling everything the scheduler juggles every moment. The reason cluster autoscaler exists: when none of these constraints can be satisfied, you ADD a node. That's what production does at 3 AM when the GPU pods can't all fit — autoscaler conjures more.",
+  "<strong>Lesson · resource requests vs limits</strong><br>The capacity numbers in this game are <em>requests</em> — the scheduler's allocation. In real K8s, there's a SECOND number: <em>limits</em>, the max a pod is allowed to actually use. The gap between request and limit is the overcommit budget — too little, you waste capacity; too much, you risk OOM-kills under spike load.",
+  "<strong>Lesson · cluster topology</strong><br>What you packed into a 5-node cluster looks tight at this scale. Production clusters can have hundreds or thousands of nodes — and they ALSO span availability zones and regions. <code>topologySpreadConstraints</code> extend the anti-affinity idea across whole datacenters. Same trick, bigger scale.",
+  "<strong>Lesson · cluster autoscaling</strong><br>When the scheduler can't fit a pending pod, the cluster autoscaler adds a node. When utilization drops below a threshold for long enough, it removes nodes. Combined with HPA (pod count) and VPA (pod size), you get a system that grows and shrinks against load without humans in the loop.",
+  "<strong>Lesson · this IS the scheduler</strong><br>You just played the actual algorithm. The real K8s scheduler scores each pod-on-node candidate using filters (must satisfy all the constraints you saw) and scorers (prefer balanced packing, prefer co-location of certain workloads, prefer pre-warmed images, etc). Every line of work is a published heuristic. None of it is magic.",
+];
+
+/* ─── Game state ───────────────────────────────────────────────────────── */
+const G = {
+  wave: 1,
+  nodes: [],
+  pendingQueue: [],   // upcoming pods (not yet shown in 3-pod queue)
+  visibleQueue: [],   // visible queue (first is current)
+  hold: null,
+  holdUsedThisPod: false,
+  score: 0,
+  combo: 0,
+  comboTimer: 0,
+  placedCount: 0,
+  totalPlacedThisRun: 0,
+  state: "title",  // title | playing | waveClear | gameOver | victory
+  preemptMode: null,  // { pod, requiredCpu, requiredMem }
+  waveStats: { perfectNodes: 0, tightFits: 0, preempts: 0 },
+};
+
+function bestScore() { try { return parseInt(localStorage.getItem("podTetris.best") || "0", 10); } catch { return 0; } }
+function setBestScore(s) { try { if (s > bestScore()) localStorage.setItem("podTetris.best", String(s)); } catch {} }
+
+/* ─── Pod generation ───────────────────────────────────────────────────── */
+let podIdCounter = 1;
+function makePod(type, opts = {}) {
+  const def = POD_TYPES[type];
+  return {
+    id: "p" + (podIdCounter++),
+    type,
+    name: def.display + "-" + podIdCounter,
+    cpu: choice(def.cpu),
+    mem: choice(def.mem),
+    color: def.hex,
+    affinityGroup: opts.affinityGroup || null,
+    taint: opts.taint || null,
+    stateful: opts.stateful || (def.statefulChance && Math.random() < def.statefulChance) || false,
+    priority: opts.priority || "normal",
+  };
+}
+
+/* Generate a wave's pod sequence based on the wave's rules. */
+function generateWavePods(wave) {
+  const pods = [];
+  // First, mandatory taints
+  if (wave.addTaints && wave.taintedPods) {
+    for (let i = 0; i < wave.taintedPods; i++) {
+      const type = choice(wave.podTypes.filter(t => t !== "sidecar"));
+      pods.push(makePod(type, { taint: "gpu" }));
+    }
+  }
+  // Affinity groups
+  if (wave.addAffinity && wave.affinityGroups) {
+    for (const g of wave.affinityGroups) {
+      for (let i = 0; i < g.count; i++) {
+        const type = choice(wave.podTypes.filter(t => t !== "sidecar" && t !== "db" && t !== "batch"));
+        pods.push(makePod(type, { affinityGroup: g.label }));
+      }
+    }
+  }
+  // Priority pods
+  if (wave.addPriority && wave.priorityPods) {
+    for (let i = 0; i < wave.priorityPods; i++) {
+      const type = choice(wave.podTypes.filter(t => t !== "sidecar"));
+      pods.push(makePod(type, { priority: "high" }));
+    }
+  }
+  // Stateful (db) pods that don't already exist
+  if (wave.addStateful) {
+    const dbCount = pods.filter(p => p.type === "db").length;
+    const needed = Math.max(0, 2 - dbCount);
+    for (let i = 0; i < needed; i++) pods.push(makePod("db", { stateful: true }));
+  }
+  // Fill remainder with weighted types
+  const weighted = [];
+  for (const t of wave.podTypes) {
+    const w = POD_TYPES[t].weight || 1;
+    for (let i = 0; i < w; i++) weighted.push(t);
+  }
+  while (pods.length < wave.podCount) {
+    const t = choice(weighted);
+    pods.push(makePod(t));
+  }
+  // Shuffle but ensure first pod is friendly (no constraints) on early waves
+  const head = pods.find(p => !p.taint && !p.affinityGroup && p.priority === "normal" && !p.stateful);
+  let rest = pods.filter(p => p !== head);
+  rest = shuffle(rest);
+  return head ? [head, ...rest] : shuffle(pods);
+}
+
+/* ─── Placement validation ─────────────────────────────────────────────── */
+function nodeUsedCpu(node) { return node.pods.reduce((s, p) => s + p.cpu, 0); }
+function nodeUsedMem(node) { return node.pods.reduce((s, p) => s + p.mem, 0); }
+
+function validatePlacement(pod, node) {
+  const usedCpu = nodeUsedCpu(node), usedMem = nodeUsedMem(node);
+  if (usedCpu + pod.cpu > node.cpu) return { ok: false, reason: "Insufficient CPU" };
+  if (usedMem + pod.mem > node.mem) return { ok: false, reason: "Insufficient memory" };
+  // Taints: a tainted node REQUIRES a matching toleration. We model this as
+  // "pod.taint must equal one of node.taints". And if node has taints, pods
+  // without matching taint can't land.
+  if (node.taints.length > 0) {
+    if (!pod.taint || !node.taints.includes(pod.taint)) {
+      return { ok: false, reason: "Node taint: " + node.taints.join(",") };
+    }
+  } else if (pod.taint) {
+    return { ok: false, reason: "Needs " + pod.taint + " node" };
+  }
+  // Anti-affinity
+  if (pod.affinityGroup) {
+    const conflict = node.pods.find(p => p.affinityGroup === pod.affinityGroup);
+    if (conflict) return { ok: false, reason: "anti-affinity: '" + pod.affinityGroup + "' here" };
+  }
+  return { ok: true };
+}
+
+/* Returns set of node IDs where this pod can be placed without preemption. */
+function validNodesFor(pod) {
+  return G.nodes.filter(n => validatePlacement(pod, n).ok).map(n => n.id);
+}
+
+/* For preemption: returns array of { node, evictable: [pods that could be evicted to make space] } */
+function preemptionOptions(pod) {
+  const out = [];
+  for (const node of G.nodes) {
+    // Skip if affinity/taint can't be satisfied even with empty node
+    const empty = { ...node, pods: [] };
+    if (!validatePlacement(pod, empty).ok) continue;
+    // What's the deficit?
+    const usedCpu = nodeUsedCpu(node), usedMem = nodeUsedMem(node);
+    const deficitCpu = Math.max(0, (usedCpu + pod.cpu) - node.cpu);
+    const deficitMem = Math.max(0, (usedMem + pod.mem) - node.mem);
+    if (deficitCpu === 0 && deficitMem === 0) continue; // would already fit normally
+    // Affinity conflict: must evict the conflicting pod
+    let mustEvict = [];
+    if (pod.affinityGroup) {
+      const conflict = node.pods.find(p => p.affinityGroup === pod.affinityGroup);
+      if (conflict) {
+        if (conflict.stateful || conflict.priority === "high") continue; // can't evict
+        mustEvict.push(conflict);
+      }
+    }
+    // Find evictable low-priority, non-stateful pods on this node
+    const candidates = node.pods.filter(p => !p.stateful && p.priority !== "high");
+    if (candidates.length === 0 && mustEvict.length === 0) continue;
+    out.push({ node, mustEvict, evictable: candidates });
+  }
+  return out;
+}
+
+/* ─── Rendering ────────────────────────────────────────────────────────── */
+const SVG_NS = "http://www.w3.org/2000/svg";
+function podHexSvg(pod, size = 50) {
+  // A hexagon sized to indicate cpu (width) and mem (height).
+  // We map cpu=1-6 to width factor 0.6-1.1 and mem=1-6 to height factor.
+  const cpuF = 0.55 + (pod.cpu - 1) * 0.10;
+  const memF = 0.55 + (pod.mem - 1) * 0.10;
+  const w = size * cpuF, h = size * memF;
+  const cx = size/2, cy = size/2;
+  const hx = w/2, hy = h/2;
+  // Hexagon points (pointy-top)
+  const pts = [
+    [cx, cy - hy],
+    [cx + hx, cy - hy*0.5],
+    [cx + hx, cy + hy*0.5],
+    [cx, cy + hy],
+    [cx - hx, cy + hy*0.5],
+    [cx - hx, cy - hy*0.5],
+  ].map(p => p.join(",")).join(" ");
+  const priorityStroke = pod.priority === "high" ? `stroke="#ff5544" stroke-width="2.5"` : `stroke="rgba(0,0,0,0.35)" stroke-width="1.5"`;
+  const affGroupColor = pod.affinityGroup ? `stroke="#c2a4e0" stroke-width="2" stroke-dasharray="3 2"` : "";
+  const innerStroke = pod.affinityGroup ? `<polygon points="${pts}" fill="none" ${affGroupColor} />` : "";
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
+    <polygon points="${pts}" fill="${pod.color}" ${priorityStroke} />
+    ${innerStroke}
+  </svg>`;
+}
+
+function podMiniSvg(pod, w, h) {
+  // For inside-node mini representation, scale by actual cpu/mem
+  return podHexSvg(pod, Math.min(w, h));
+}
+
+/* Build a pod card DOM for the queue/hold area. */
+function podCardEl(pod, opts = {}) {
+  const card = document.createElement("div");
+  card.className = "pod-card";
+  card.dataset.podId = pod.id;
+  card.style.borderColor = pod.color + "55";
+  card.innerHTML = `
+    <div class="row-top">
+      <div class="name">${pod.name}</div>
+      <div class="badges">
+        ${pod.affinityGroup ? `<span class="badge affinity">${pod.affinityGroup}</span>` : ""}
+        ${pod.taint ? `<span class="badge gpu">${pod.taint}</span>` : ""}
+        ${pod.stateful ? `<span class="badge stateful">stateful</span>` : ""}
+        ${pod.priority === "high" ? `<span class="badge priority">priority</span>` : ""}
+      </div>
+    </div>
+    <div class="pod-shape">${podHexSvg(pod, 56)}</div>
+    <div class="resources">
+      <span class="res">CPU <b>${pod.cpu}</b></span>
+      <span class="res">MEM <b>${pod.mem}</b></span>
+    </div>
+  `;
+  return card;
+}
+
+/* Render the queue panel. The first pod is "current" (will be placed on next click). */
+function renderQueue() {
+  const q = $("#queue");
+  q.innerHTML = "";
+  G.visibleQueue.forEach((pod, i) => {
+    const c = podCardEl(pod);
+    if (i === 0) c.classList.add("current");
+    else if (i === 1) c.classList.add("next");
+    else c.classList.add("future");
+    q.appendChild(c);
+  });
+}
+
+/* Render the hold slot. */
+function renderHold() {
+  const h = $("#hold");
+  h.innerHTML = "";
+  if (G.hold) {
+    const c = podCardEl(G.hold);
+    c.addEventListener("click", swapHold);
+    h.appendChild(c);
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "empty-text";
+    empty.innerHTML = "empty — press <b style='color:var(--gold-warm);'>space</b> to stash";
+    h.appendChild(empty);
+  }
+}
+
+/* Render a single node element. Pure builder; doesn't update placement state. */
+function nodeEl(node, idx) {
+  const div = document.createElement("div");
+  div.className = "node";
+  div.dataset.nodeId = node.id;
+  const usedCpu = nodeUsedCpu(node), usedMem = nodeUsedMem(node);
+  const cpuPct = (usedCpu / node.cpu) * 100;
+  const memPct = (usedMem / node.mem) * 100;
+  div.innerHTML = `
+    <header>
+      <span class="name">${node.name}</span>
+      <span class="key">${idx + 1}</span>
+    </header>
+    ${node.taints.length > 0 ? `<div class="taint-tag">taint: ${node.taints.join(",")}</div>` : ""}
+    <div class="cap-bars">
+      <div class="cap-bar">
+        <label>CPU</label>
+        <div class="bar">
+          <div class="fill" style="width: ${cpuPct}%;"></div>
+          <div class="ghost" data-axis="cpu"></div>
+        </div>
+        <span class="num">${usedCpu}/${node.cpu}</span>
+      </div>
+      <div class="cap-bar">
+        <label>MEM</label>
+        <div class="bar">
+          <div class="fill" style="width: ${memPct}%;"></div>
+          <div class="ghost" data-axis="mem"></div>
+        </div>
+        <span class="num">${usedMem}/${node.mem}</span>
+      </div>
+    </div>
+    <div class="pods-here"></div>
+    <div class="invalid-tooltip"></div>
+  `;
+  // Apply fill color classes
+  applyFillClass(div.querySelector(".cap-bar:nth-child(1) .fill"), cpuPct);
+  applyFillClass(div.querySelector(".cap-bar:nth-child(2) .fill"), memPct);
+  // Render pods inside
+  const podsEl = div.querySelector(".pods-here");
+  if (node.pods.length === 0) {
+    podsEl.innerHTML = `<div class="empty-text">empty</div>`;
+  } else {
+    for (const p of node.pods) {
+      const mini = document.createElement("div");
+      mini.className = "pod-mini" + (p.stateful ? " stateful" : "") + (p._justEntered ? " entering" : "");
+      mini.dataset.podId = p.id;
+      // Width/height proportional to cpu/mem
+      const w = 16 + p.cpu * 7;
+      const h = 16 + p.mem * 5;
+      mini.style.width = w + "px";
+      mini.style.height = h + "px";
+      mini.innerHTML = podHexSvg(p, Math.min(w, h));
+      if (p.cpu * p.mem >= 6) {
+        const label = document.createElement("div");
+        label.className = "mini-label";
+        label.textContent = p.type.charAt(0).toUpperCase();
+        mini.appendChild(label);
+      }
+      podsEl.appendChild(mini);
+      // Clear the "just entered" flag after animation
+      if (p._justEntered) setTimeout(() => { delete p._justEntered; }, 500);
+    }
+  }
+  // Full?
+  if (usedCpu >= node.cpu && usedMem >= node.mem) div.classList.add("full");
+  return div;
+}
+
+function applyFillClass(fillEl, pct) {
+  if (!fillEl) return;
+  fillEl.classList.remove("medium", "high", "full");
+  if (pct >= 100) fillEl.classList.add("full");
+  else if (pct >= 75) fillEl.classList.add("high");
+  else if (pct >= 50) fillEl.classList.add("medium");
+}
+
+function renderBoard() {
+  const board = $("#board");
+  board.innerHTML = "";
+  G.nodes.forEach((node, i) => board.appendChild(nodeEl(node, i)));
+  refreshPlacementHints();
+}
+
+/* Show valid placement targets for the current pod. Hover over a node:
+   show ghost fills that preview what the bars would look like after placement. */
+function refreshPlacementHints() {
+  if (G.state !== "playing" || G.preemptMode) {
+    document.querySelectorAll(".node").forEach(n => { delete n.dataset.canPlace; n.querySelector(".invalid-tooltip").textContent = ""; });
+    return;
+  }
+  const pod = currentPod();
+  if (!pod) return;
+  for (const node of G.nodes) {
+    const el = document.querySelector(`.node[data-node-id="${node.id}"]`);
+    if (!el) continue;
+    const v = validatePlacement(pod, node);
+    if (v.ok) {
+      el.dataset.canPlace = "yes";
+      el.querySelector(".invalid-tooltip").textContent = "";
+      // Update ghost fills (what bars would look like after)
+      const newCpu = ((nodeUsedCpu(node) + pod.cpu) / node.cpu) * 100;
+      const newMem = ((nodeUsedMem(node) + pod.mem) / node.mem) * 100;
+      const ghostCpu = el.querySelector('.ghost[data-axis="cpu"]');
+      const ghostMem = el.querySelector('.ghost[data-axis="mem"]');
+      if (ghostCpu) ghostCpu.style.width = newCpu + "%";
+      if (ghostMem) ghostMem.style.width = newMem + "%";
+    } else {
+      el.dataset.canPlace = "no";
+      el.querySelector(".invalid-tooltip").textContent = v.reason;
+      const ghostCpu = el.querySelector('.ghost[data-axis="cpu"]');
+      const ghostMem = el.querySelector('.ghost[data-axis="mem"]');
+      if (ghostCpu) ghostCpu.style.width = "0%";
+      if (ghostMem) ghostMem.style.width = "0%";
+    }
+  }
+}
+
+/* ─── Score / floating popups ──────────────────────────────────────────── */
+function floatScore(x, y, text, cls = "") {
+  const el = document.createElement("div");
+  el.className = "floating-score " + cls;
+  el.style.left = x + "px"; el.style.top = y + "px";
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1500);
+}
+
+function updateHUD() {
+  $("#hud-wave").textContent = String(G.wave);
+  $("#hud-score").textContent = G.score.toLocaleString();
+  const cEl = $("#hud-combo");
+  cEl.textContent = "×" + (G.combo + 1);
+  cEl.classList.toggle("zero", G.combo === 0);
+  $("#hud-placed").textContent = String(G.placedCount);
+}
+
+/* ─── Placement logic ───────────────────────────────────────────────────── */
+function currentPod() { return G.visibleQueue[0]; }
+
+function placeCurrentOn(nodeIdx) {
+  if (G.state !== "playing") return;
+  if (G.preemptMode) return; // need to evict
+  const pod = currentPod();
+  if (!pod) return;
+  const node = G.nodes[nodeIdx];
+  if (!node) return;
+  const v = validatePlacement(pod, node);
+  if (!v.ok) {
+    invalidPlacement(node, v.reason);
+    return;
+  }
+  doPlace(pod, node);
+}
+
+function invalidPlacement(node, reason) {
+  sfx("invalid");
+  const el = document.querySelector(`.node[data-node-id="${node.id}"]`);
+  if (el) { el.classList.add("invalid-shake"); setTimeout(() => el.classList.remove("invalid-shake"), 400); }
+  $("#message").innerHTML = `<span style="color:var(--red);">✕ ${reason}.</span> Try a different node, or <b>Space</b> to hold this pod.`;
+  G.combo = 0;
+  updateHUD();
+}
+
+function doPlace(pod, node) {
+  pod._justEntered = true;
+  node.pods.push(pod);
+  G.visibleQueue.shift();
+  G.holdUsedThisPod = false;
+  refillVisibleQueue();
+
+  // Score
+  const usedCpu = nodeUsedCpu(node), usedMem = nodeUsedMem(node);
+  let basePoints = 10;
+  let bonus = 0;
+  let toast = "";
+  const cpuLeft = node.cpu - usedCpu, memLeft = node.mem - usedMem;
+  const isPerfect = usedCpu === node.cpu && usedMem === node.mem;
+  const isTight = !isPerfect && (cpuLeft <= 1 && memLeft <= 1);
+  if (isPerfect) {
+    bonus = 200;
+    toast = "PERFECT FIT";
+    G.combo++;
+    G.waveStats.perfectNodes++;
+    sfx("perfect");
+  } else if (isTight) {
+    bonus = 80;
+    toast = "Tight pack +80";
+    G.combo++;
+    G.waveStats.tightFits++;
+    sfx("tight");
+  } else if (cpuLeft <= 2 && memLeft <= 2 && (usedCpu + usedMem) > 8) {
+    bonus = 25;
+    toast = "+25";
+    sfx("place");
+  } else {
+    sfx("place");
+  }
+  const total = (basePoints + bonus) * (1 + G.combo * 0.1);
+  G.score += Math.round(total);
+  G.placedCount++;
+  G.totalPlacedThisRun++;
+  if (G.combo === 0 && !isPerfect && !isTight) {
+    // No combo, no toast text
+  } else if (toast) {
+    const el = document.querySelector(`.node[data-node-id="${node.id}"]`);
+    const rect = el.getBoundingClientRect();
+    floatScore(rect.left + rect.width/2, rect.top + 40, toast, isPerfect ? "perfect" : "combo");
+  }
+  if (!isPerfect && !isTight) G.combo = 0;
+
+  // Friendly message about what just happened
+  let msg = `Placed ${pod.name} on ${node.name}. `;
+  if (isPerfect) msg += "<b style='color:var(--gold-warm);'>NODE PACKED PERFECTLY.</b>";
+  else if (isTight) msg += "Tight pack — excellent.";
+  else if (cpuLeft === 0 || memLeft === 0) msg += "One axis maxed; tight on the other.";
+  else msg += `${cpuLeft} CPU, ${memLeft} mem left on this node.`;
+  $("#message").innerHTML = msg;
+  updateHUD();
+  renderBoard();
+  renderQueue();
+
+  // Brief flash for full node
+  if (isPerfect || (usedCpu === node.cpu && usedMem === node.mem)) {
+    const el = document.querySelector(`.node[data-node-id="${node.id}"]`);
+    if (el) { el.classList.add("perfect"); setTimeout(() => el.classList.remove("perfect"), 1000); sfx("node-full"); }
+  }
+
+  // Check for wave clear or game over
+  if (G.visibleQueue.length === 0 && G.pendingQueue.length === 0) {
+    waveClear();
+    return;
+  }
+  // Check if NEW current pod has any valid placement
+  checkLoseCondition();
+}
+
+function checkLoseCondition() {
+  const pod = currentPod();
+  if (!pod) return;
+  const valid = validNodesFor(pod);
+  // If pod is priority, check preemption options
+  if (valid.length === 0) {
+    if (pod.priority === "high") {
+      const opts = preemptionOptions(pod);
+      if (opts.length > 0) {
+        enterPreemptMode(pod, opts);
+        return;
+      }
+    }
+    // Check if hold can save us
+    if (G.hold && validNodesFor(G.hold).length > 0 && !G.holdUsedThisPod) {
+      $("#message").innerHTML = `<span style="color:var(--orange);">⚠ No valid placement for ${pod.name}.</span> Press <b>Space</b> to swap with hold.`;
+      return;
+    }
+    gameOver(pod);
+  }
+}
+
+/* ─── Preemption flow ───────────────────────────────────────────────────── */
+function enterPreemptMode(pod, options) {
+  G.preemptMode = { pod, options };
+  const banner = $("#preempt-banner");
+  banner.classList.remove("hidden");
+  banner.innerHTML = `
+    <b>HIGH PRIORITY: ${pod.name}</b> can't fit. Click a low-priority pod to <b>evict</b> it and free space.
+    <button id="cancel-preempt">Cancel (lose)</button>
+  `;
+  $("#cancel-preempt").addEventListener("click", () => gameOver(pod));
+
+  // Highlight evictable pods
+  document.querySelectorAll(".node").forEach(nodeEl => {
+    const nid = parseInt(nodeEl.dataset.nodeId, 10);
+    const opt = options.find(o => o.node.id === nid);
+    if (!opt) return;
+    nodeEl.classList.add("preempt-target");
+    opt.evictable.forEach(p => {
+      const mini = nodeEl.querySelector(`.pod-mini[data-pod-id="${p.id}"]`);
+      if (mini) {
+        mini.classList.add("evictable");
+        mini.addEventListener("click", () => doEvict(opt.node, p, pod));
+      }
+    });
+    // mustEvict pods are pre-flagged as "must"
+    opt.mustEvict.forEach(p => {
+      const mini = nodeEl.querySelector(`.pod-mini[data-pod-id="${p.id}"]`);
+      if (mini) {
+        mini.classList.add("evictable");
+        mini.style.outline = "2px dashed var(--red)";
+        mini.addEventListener("click", () => doEvict(opt.node, p, pod));
+      }
+    });
+  });
+}
+
+function doEvict(node, victim, attacker) {
+  // Remove victim from node
+  node.pods = node.pods.filter(p => p.id !== victim.id);
+  G.waveStats.preempts++;
+  sfx("preempt");
+  $("#message").innerHTML = `<span style="color:var(--red);">⚠ Evicted ${victim.name}.</span> Now placing ${attacker.name}.`;
+  // Clear preempt mode visuals
+  exitPreemptMode();
+  // Try to place attacker again
+  const v = validatePlacement(attacker, node);
+  if (v.ok) {
+    doPlace(attacker, node);
+  } else {
+    // Still doesn't fit (maybe another conflicting pod) — re-enter preempt mode
+    checkLoseCondition();
+  }
+}
+
+function exitPreemptMode() {
+  G.preemptMode = null;
+  $("#preempt-banner").classList.add("hidden");
+  document.querySelectorAll(".node.preempt-target").forEach(n => n.classList.remove("preempt-target"));
+  document.querySelectorAll(".pod-mini.evictable").forEach(m => {
+    m.classList.remove("evictable");
+    m.style.outline = "";
+  });
+}
+
+/* ─── Hold / queue management ──────────────────────────────────────────── */
+function swapHold() {
+  if (G.state !== "playing") return;
+  if (G.preemptMode) return;
+  const pod = currentPod();
+  if (!pod) return;
+  if (G.holdUsedThisPod) {
+    $("#message").innerHTML = "<span style='color:var(--orange);'>Hold already used for this pod.</span> Place this one first.";
+    sfx("invalid");
+    return;
+  }
+  if (G.hold) {
+    // Swap: hold ↔ current
+    G.visibleQueue[0] = G.hold;
+    G.hold = pod;
+  } else {
+    // Push current to hold, advance queue
+    G.hold = pod;
+    G.visibleQueue.shift();
+    refillVisibleQueue();
+    if (G.visibleQueue.length === 0 && G.pendingQueue.length === 0) { waveClear(); return; }
+  }
+  G.holdUsedThisPod = true;
+  sfx("hold");
+  $("#message").innerHTML = `Stashed in hold. <em>Next pod is now active.</em>`;
+  renderQueue();
+  renderHold();
+  refreshPlacementHints();
+  checkLoseCondition();
+}
+
+function refillVisibleQueue() {
+  while (G.visibleQueue.length < 3 && G.pendingQueue.length > 0) {
+    G.visibleQueue.push(G.pendingQueue.shift());
+  }
+}
+
+/* ─── Wave lifecycle ───────────────────────────────────────────────────── */
+function startWave(n) {
+  G.wave = n;
+  const def = WAVES[n - 1];
+  G.nodes = def.nodes();
+  G.pendingQueue = generateWavePods(def);
+  G.visibleQueue = [];
+  refillVisibleQueue();
+  G.holdUsedThisPod = false;
+  G.placedCount = 0;
+  G.waveStats = { perfectNodes: 0, tightFits: 0, preempts: 0 };
+  G.state = "playing";
+  // Show tutorial banner
+  const tut = $("#tutorial");
+  tut.innerHTML = def.intro;
+  tut.classList.remove("hidden");
+  setTimeout(() => tut.classList.add("hidden"), 8500);
+  $("#message").innerHTML = "Click a node to place the highlighted pod.";
+  renderBoard();
+  renderQueue();
+  renderHold();
+  updateHUD();
+  sfx("wave-start");
+}
+
+function waveClear() {
+  G.state = "waveClear";
+  sfx("wave-clear");
+  const def = WAVES[G.wave - 1];
+  $("#wave-clear-title").textContent = `WAVE ${G.wave} CLEAR`;
+  $("#wave-clear-sub").textContent = G.wave === WAVES.length ? "You scheduled the cluster." : "Onward.";
+  $("#wave-stats").innerHTML = `
+    <span>Pods placed</span><span>${G.placedCount}/${def.podCount}</span>
+    <span>Perfect nodes</span><span>${G.waveStats.perfectNodes}</span>
+    <span>Tight fits</span><span>${G.waveStats.tightFits}</span>
+    <span>Preemptions</span><span>${G.waveStats.preempts}</span>
+    <span>Current score</span><span>${G.score.toLocaleString()}</span>
+  `;
+  $("#wave-lesson").innerHTML = WAVE_LESSONS[G.wave - 1] || "On to the next.";
+  if (G.wave === WAVES.length) victory();
+  else $("#screen-wave-clear").style.display = "flex";
+}
+
+function nextWave() {
+  $("#screen-wave-clear").style.display = "none";
+  startWave(G.wave + 1);
+}
+
+function gameOver(stuckPod) {
+  G.state = "gameOver";
+  setBestScore(G.score);
+  sfx("defeat");
+  const fit = stuckPod ? `${stuckPod.name} (${stuckPod.cpu}C/${stuckPod.mem}M${stuckPod.taint ? ", "+stuckPod.taint:""}${stuckPod.affinityGroup?", "+stuckPod.affinityGroup:""})` : "a pod";
+  $("#over-title").textContent = "GAME OVER";
+  $("#over-sub").textContent = `${fit} couldn't find a home.`;
+  $("#over-stats").innerHTML = `
+    <span>Final score</span><span>${G.score.toLocaleString()}</span>
+    <span>Wave reached</span><span>${G.wave}/${WAVES.length}</span>
+    <span>Pods placed (run)</span><span>${G.totalPlacedThisRun}</span>
+    <span>Best ever</span><span>${bestScore().toLocaleString()}</span>
+  `;
+  // Custom lesson card based on what stuck
+  let lesson;
+  if (stuckPod && stuckPod.affinityGroup) {
+    lesson = `<strong>The stuck pod:</strong> a member of the <code>${stuckPod.affinityGroup}</code> deployment, but every node already has one. <br><br>` +
+      "Anti-affinity is unforgiving — there's no fitting two replicas of the same service on the same node, no matter how much CPU is left. The fix in production: add more nodes (or distinct topology zones) than your largest replica count.";
+  } else if (stuckPod && stuckPod.taint) {
+    lesson = `<strong>The stuck pod:</strong> needed a <code>${stuckPod.taint}</code> node, but those were full. <br><br>` +
+      "Special-hardware nodes are scarce by design (you don't buy GPU nodes for a Helm chart). Reserve their capacity intentionally; don't let it be filled by accident. In real clusters, <code>NoSchedule</code> taints keep non-GPU work off GPU nodes — but the converse (preventing GPU pods from getting starved) is a quota problem.";
+  } else if (stuckPod && stuckPod.cpu + stuckPod.mem >= 7) {
+    lesson = "<strong>The stuck pod:</strong> a large pod (high CPU + memory). " +
+      "Large pods are the bin-packer's nightmare — they need a clean, mostly-empty node. If you scatter small pods across all your nodes, the big pod has nowhere to land. Production trick: dedicate certain node pools to big workloads (a 'machine learning pool'), so small pods can't fragment them.";
+  } else {
+    lesson = "<strong>The lesson:</strong> bin packing is hard. Even with no special constraints, you can paint yourself into a corner by placing small pods inefficiently. Aim for ASYMMETRIC pairs — a CPU-heavy worker and a memory-heavy cache on the same node — to fill BOTH axes together.";
+  }
+  $("#over-lesson").innerHTML = lesson;
+  $("#screen-game-over").style.display = "flex";
+}
+
+function victory() {
+  G.state = "victory";
+  setBestScore(G.score);
+  sfx("victory");
+  $("#victory-stats").innerHTML = `
+    <span>Final score</span><span>${G.score.toLocaleString()}</span>
+    <span>Pods placed (run)</span><span>${G.totalPlacedThisRun}</span>
+    <span>Best ever</span><span>${Math.max(bestScore(), G.score).toLocaleString()}</span>
+  `;
+  $("#victory-lesson").innerHTML = WAVE_LESSONS[WAVES.length - 1];
+  $("#screen-victory").style.display = "flex";
+}
+
+/* ─── Input wiring ─────────────────────────────────────────────────────── */
+$("#board").addEventListener("click", e => {
+  if (G.preemptMode) return; // preempt mode handles its own clicks on pod-minis
+  const nodeEl = e.target.closest(".node");
+  if (!nodeEl) return;
+  const idx = G.nodes.findIndex(n => n.id === parseInt(nodeEl.dataset.nodeId, 10));
+  if (idx >= 0) placeCurrentOn(idx);
+});
+
+/* Hover preview: when hovering over a node, show the "would-be" bars */
+$("#board").addEventListener("mouseenter", e => refreshPlacementHints(), true);
+
+window.addEventListener("keydown", e => {
+  if (G.state !== "playing") return;
+  if (e.code === "Space") { e.preventDefault(); swapHold(); return; }
+  if (e.code === "KeyR") {
+    if (confirm("Restart from Wave 1?")) restart();
+    return;
+  }
+  const num = parseInt(e.key, 10);
+  if (!isNaN(num) && num >= 1 && num <= G.nodes.length) {
+    placeCurrentOn(num - 1);
+  }
+});
+
+/* ─── Init / screen wiring ─────────────────────────────────────────────── */
+function restart() {
+  document.querySelectorAll(".screen").forEach(s => s.style.display = "none");
+  G.wave = 1;
+  G.score = 0;
+  G.combo = 0;
+  G.totalPlacedThisRun = 0;
+  G.hold = null;
+  startWave(1);
+}
+
+$("#btn-start").addEventListener("click", () => { ensureAudio(); restart(); });
+$("#btn-next-wave").addEventListener("click", () => { nextWave(); });
+$("#btn-retry").addEventListener("click", () => restart());
+$("#btn-victory-replay").addEventListener("click", () => restart());
+
+const best = bestScore();
+$("#best-display").textContent = best > 0 ? `Best: ${best.toLocaleString()}` : "";
+</script>
+</body>
+</html>
