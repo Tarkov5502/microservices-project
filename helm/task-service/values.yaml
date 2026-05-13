@@ -1,0 +1,31 @@
+replicaCount: 2
+image:
+  repository: REPLACE_ACR_LOGIN_SERVER/task-service
+  pullPolicy: Always
+  tag: "latest"
+service:
+  type: ClusterIP
+  port: 8002
+  targetPort: 8002
+resources:
+  requests: { cpu: 150m, memory: 192Mi }
+  limits:   { cpu: 750m, memory: 768Mi }
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+secretName: app-secrets
+env:
+  ENVIRONMENT: production
+  SERVICEBUS_TOPIC_TASKS: "task-events"
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8002"
+tolerations:
+  - key: workload
+    operator: Equal
+    value: app
+    effect: NoSchedule
+livenessProbe:  { path: /health, port: 8002, initialDelaySeconds: 20, periodSeconds: 30 }
+readinessProbe: { path: /health/ready, port: 8002, initialDelaySeconds: 10, periodSeconds: 10 }

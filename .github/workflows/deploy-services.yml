@@ -1,0 +1,180 @@
+# =============================================================================
+# SERVICE DEPLOY PIPELINE
+#
+# WORKFLOW:
+#   Merge to main → build Docker images for changed services → push to ACR
+#                 → helm upgrade each service in AKS (zero-downtime rolling)
+#
+# SMART CHANGE DETECTION:
+#   Uses path filters so only changed services get rebuilt and redeployed.
+#   No need to redeploy all 4 services when you only changed 1!
+# =============================================================================
+
+name: Deploy Services
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/**"
+      - "helm/**"
+      - "kubernetes/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AKS_CLUSTER_NAME: aks-microservices-dev
+  AKS_RESOURCE_GROUP: rg-microservices-dev
+  K8S_NAMESPACE: microservices
+
+jobs:
+  # ─── Detect which services changed ────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api-gateway: ${{ steps.filter.outputs.api-gateway }}
+      user-service: ${{ steps.filter.outputs.user-service }}
+      task-service: ${{ steps.filter.outputs.task-service }}
+      notification-service: ${{ steps.filter.outputs.notification-service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api-gateway:
+              - 'services/api-gateway/**'
+              - 'helm/api-gateway/**'
+            user-service:
+              - 'services/user-service/**'
+              - 'helm/user-service/**'
+            task-service:
+              - 'services/task-service/**'
+              - 'helm/task-service/**'
+            notification-service:
+              - 'services/notification-service/**'
+              - 'helm/notification-service/**'
+
+  # ─── Build + Push changed images to ACR ───────────────────────────────────
+  build-and-push:
+    name: Build ${{ matrix.service }}
+    needs: changes
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: api-gateway
+            changed: ${{ needs.changes.outputs.api-gateway }}
+          - service: user-service
+            changed: ${{ needs.changes.outputs.user-service }}
+          - service: task-service
+            changed: ${{ needs.changes.outputs.task-service }}
+          - service: notification-service
+            changed: ${{ needs.changes.outputs.notification-service }}
+
+    if: matrix.changed == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ secrets.ACR_NAME }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          # Tag with both the git SHA (immutable) and 'latest' (mutable)
+          # Always use the SHA tag in production — 'latest' is ambiguous!
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.service }}:latest
+          cache-from: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.service }}:latest
+          cache-to: type=inline
+
+  # ─── Deploy to AKS ────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to AKS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get AKS credentials (kubeconfig)
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: "3.14.4"
+
+      # Apply base K8s resources (idempotent)
+      - name: Apply namespaces + RBAC
+        run: |
+          kubectl apply -f kubernetes/namespaces/
+          kubectl apply -f kubernetes/rbac/
+          kubectl apply -f kubernetes/network-policies/
+
+      # Deploy each service that was built (using the exact SHA for reproducibility)
+      - name: Deploy api-gateway
+        if: needs.changes.outputs.api-gateway == 'true'
+        run: |
+          helm upgrade --install api-gateway ./helm/api-gateway \
+            --namespace ${{ env.K8S_NAMESPACE }} \
+            --set image.repository=${{ secrets.ACR_LOGIN_SERVER }}/api-gateway \
+            --set image.tag=${{ github.sha }} \
+            --wait --timeout=5m
+
+      - name: Deploy user-service
+        if: needs.changes.outputs.user-service == 'true'
+        run: |
+          helm upgrade --install user-service ./helm/user-service \
+            --namespace ${{ env.K8S_NAMESPACE }} \
+            --set image.repository=${{ secrets.ACR_LOGIN_SERVER }}/user-service \
+            --set image.tag=${{ github.sha }} \
+            --wait --timeout=5m
+
+      - name: Deploy task-service
+        if: needs.changes.outputs.task-service == 'true'
+        run: |
+          helm upgrade --install task-service ./helm/task-service \
+            --namespace ${{ env.K8S_NAMESPACE }} \
+            --set image.repository=${{ secrets.ACR_LOGIN_SERVER }}/task-service \
+            --set image.tag=${{ github.sha }} \
+            --wait --timeout=5m
+
+      - name: Deploy notification-service
+        if: needs.changes.outputs.notification-service == 'true'
+        run: |
+          helm upgrade --install notification-service ./helm/notification-service \
+            --namespace ${{ env.K8S_NAMESPACE }} \
+            --set image.repository=${{ secrets.ACR_LOGIN_SERVER }}/notification-service \
+            --set image.tag=${{ github.sha }} \
+            --wait --timeout=5m
+
+      - name: Verify deployment health
+        run: |
+          kubectl rollout status deployment/api-gateway -n ${{ env.K8S_NAMESPACE }} --timeout=3m
+          kubectl get pods -n ${{ env.K8S_NAMESPACE }}

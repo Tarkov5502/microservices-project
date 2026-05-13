@@ -1,0 +1,30 @@
+replicaCount: 1
+image:
+  repository: REPLACE_ACR_LOGIN_SERVER/notification-service
+  pullPolicy: Always
+  tag: "latest"
+service:
+  type: ClusterIP
+  port: 8003
+  targetPort: 8003
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits:   { cpu: 250m, memory: 256Mi }
+autoscaling:
+  enabled: false
+secretName: app-secrets
+env:
+  ENVIRONMENT: production
+  SERVICEBUS_TOPIC_TASKS: "task-events"
+  SERVICEBUS_TOPIC_USERS: "user-events"
+  SERVICEBUS_SUBSCRIPTION_NAME: "notification-service"
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8003"
+tolerations:
+  - key: workload
+    operator: Equal
+    value: app
+    effect: NoSchedule
+livenessProbe:  { path: /health, port: 8003, initialDelaySeconds: 15, periodSeconds: 30 }
+readinessProbe: { path: /health/ready, port: 8003, initialDelaySeconds: 10, periodSeconds: 10 }

@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: microservices
+  labels:
+    app: notification-service
+spec:
+  replicas: 1  # Usually 1 consumer per partition is fine for Service Bus
+  selector:
+    matchLabels:
+      app: notification-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: notification-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8003"
+    spec:
+      serviceAccountName: notification-service
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "app"
+          effect: "NoSchedule"
+      containers:
+        - name: notification-service
+          image: REPLACE_ACR_LOGIN_SERVER/notification-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8003
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          env:
+            - name: SERVICEBUS_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: sb-listener-connection-string
+            - name: SERVICEBUS_TOPIC_TASKS
+              value: "task-events"
+            - name: SERVICEBUS_TOPIC_USERS
+              value: "user-events"
+            - name: SERVICEBUS_SUBSCRIPTION_NAME
+              value: "notification-service"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8003
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: microservices
+spec:
+  selector:
+    app: notification-service
+  ports:
+    - name: http
+      port: 8003
+      targetPort: 8003
+  type: ClusterIP

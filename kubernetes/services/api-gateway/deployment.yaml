@@ -1,0 +1,203 @@
+# =============================================================================
+# KUBERNETES: api-gateway — Deployment + Service + HPA
+# PURPOSE: The API Gateway is the single entry point for all client requests.
+#          It validates JWTs, handles routing, and rate limits.
+#
+# KUBERNETES CONCEPTS:
+#   Deployment: Manages a set of identical pods (replicas). If a pod dies,
+#               the Deployment controller creates a replacement automatically.
+#   Service:    A stable network endpoint in front of pods. Pods come and go,
+#               but the Service IP/DNS stays constant.
+#   HPA:        HorizontalPodAutoscaler — scales pod COUNT based on CPU/memory.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: microservices
+  labels:
+    app: api-gateway
+    version: "1.0"
+spec:
+  # Start with 2 replicas — never run a single pod in production! (SPOF)
+  replicas: 2
+
+  # The selector tells the Deployment which pods it "owns"
+  selector:
+    matchLabels:
+      app: api-gateway
+
+  # Rolling update strategy: update pods one by one, not all at once.
+  # This ensures zero-downtime deployments.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Allow 1 extra pod during update
+      maxUnavailable: 0  # Never have fewer than desired replicas
+
+  template:  # This is the pod template
+    metadata:
+      labels:
+        app: api-gateway
+        version: "1.0"
+      annotations:
+        # Tells Prometheus to scrape this pod for metrics
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: api-gateway
+
+      # Topology spread: ensure replicas land on DIFFERENT nodes for HA
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: api-gateway
+
+      # Toleration: allows this pod to land on the "app" node pool
+      # (which has the taint workload=app:NoSchedule)
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "app"
+          effect: "NoSchedule"
+
+      containers:
+        - name: api-gateway
+          # Image will be substituted by CI/CD pipeline
+          image: REPLACE_ACR_LOGIN_SERVER/api-gateway:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+
+          # Resource requests = what the scheduler uses to place the pod
+          # Resource limits = hard cap the container can NEVER exceed
+          resources:
+            requests:
+              cpu: "100m"     # 0.1 CPU cores
+              memory: "128Mi" # 128 MB RAM
+            limits:
+              cpu: "500m"     # 0.5 CPU cores
+              memory: "512Mi" # 512 MB RAM
+
+          env:
+            - name: ENVIRONMENT
+              value: "production"
+            - name: USER_SERVICE_URL
+              value: "http://user-service.microservices.svc.cluster.local:8001"
+            - name: TASK_SERVICE_URL
+              value: "http://task-service.microservices.svc.cluster.local:8002"
+            - name: NOTIFICATION_SERVICE_URL
+              value: "http://notification-service.microservices.svc.cluster.local:8003"
+            # JWT secret fetched from Kubernetes Secret (originally from Key Vault)
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: jwt-secret
+
+          # Liveness probe: if this fails, Kubernetes RESTARTS the container
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15  # Wait 15s before first check (startup time)
+            periodSeconds: 30        # Check every 30 seconds
+            failureThreshold: 3      # Restart after 3 consecutive failures
+
+          # Readiness probe: if this fails, pod is REMOVED from Service load balancer
+          # (traffic stops going to it, but container isn't restarted)
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # Startup probe: for slow-starting containers. Disables liveness check
+          # until the app has had time to initialize.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 5
+
+      # Security context: run as non-root user (security best practice)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+---
+# ─── Service ─────────────────────────────────────────────────────────────────
+# ClusterIP Service: only reachable INSIDE the cluster (via DNS or IP).
+# The Ingress controller will forward external traffic to this Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: microservices
+  labels:
+    app: api-gateway
+spec:
+  selector:
+    app: api-gateway   # Routes to pods with this label
+  ports:
+    - name: http
+      port: 80          # Service port (what callers use)
+      targetPort: 8000  # Pod port (what the container listens on)
+  type: ClusterIP
+
+---
+# ─── HorizontalPodAutoscaler ─────────────────────────────────────────────────
+# Automatically adjusts pod count based on observed CPU/memory usage.
+# Works WITH the Cluster Autoscaler: HPA adds pods → CA adds nodes if needed.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway
+  namespace: microservices
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 2    # Never scale below 2 (HA minimum)
+  maxReplicas: 10   # Never scale above 10
+
+  metrics:
+    # Scale up when average CPU across all pods exceeds 70%
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    # Also scale on memory pressure
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60   # Wait 60s before scaling up again
+      policies:
+        - type: Pods
+          value: 2                      # Add at most 2 pods at a time
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 minutes before scaling down
+      policies:
+        - type: Pods
+          value: 1                     # Remove at most 1 pod at a time
+          periodSeconds: 60

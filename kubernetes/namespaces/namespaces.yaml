@@ -1,0 +1,81 @@
+# =============================================================================
+# KUBERNETES: Namespaces
+# PURPOSE: Namespaces are virtual clusters inside your physical cluster.
+#          They provide isolation, resource quotas, and RBAC boundaries.
+#
+# WHAT YOU'LL LEARN:
+#   - Namespace isolation
+#   - Resource quotas (preventing one team from hogging all memory)
+#   - LimitRanges (default resource limits for pods)
+#   - Labels for organization and selection
+# =============================================================================
+
+# ─── Application Namespace ───────────────────────────────────────────────────
+# All our microservices run here, isolated from system components.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: microservices
+  labels:
+    name: microservices
+    # Istio label — if you later add a service mesh, this enables sidecar injection
+    istio-injection: disabled
+    # PodSecurity label: enforce security standards at namespace level
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+
+---
+# ResourceQuota: limits the TOTAL resources consumed in the namespace.
+# This prevents one misbehaving service from starving all the others.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: microservices-quota
+  namespace: microservices
+spec:
+  hard:
+    # Total compute caps across all pods in the namespace
+    requests.cpu: "8"        # 8 cores total requested
+    requests.memory: "16Gi"  # 16GB total requested
+    limits.cpu: "16"         # 16 cores total limit
+    limits.memory: "32Gi"    # 32GB total limit
+
+    # Object count caps (prevents runaway deployments)
+    pods: "50"
+    services: "20"
+    secrets: "30"
+    configmaps: "30"
+    persistentvolumeclaims: "10"
+
+---
+# LimitRange: sets default resource requests/limits for pods that don't specify them.
+# Without this, pods with no limits could consume unlimited resources!
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: microservices-limits
+  namespace: microservices
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"      # 0.5 CPU cores default limit
+        memory: "512Mi"  # 512MB default limit
+      defaultRequest:
+        cpu: "100m"      # 0.1 CPU cores default request
+        memory: "128Mi"  # 128MB default request
+      max:
+        cpu: "4"         # No single container can use more than 4 cores
+        memory: "4Gi"    # or 4GB
+      min:
+        cpu: "10m"       # Must request at least 10 millicores
+        memory: "32Mi"
+
+---
+# Monitoring namespace — Prometheus and Grafana live here
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring

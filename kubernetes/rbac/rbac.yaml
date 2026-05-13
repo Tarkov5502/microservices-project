@@ -1,0 +1,127 @@
+# =============================================================================
+# KUBERNETES: RBAC (Role-Based Access Control)
+# PURPOSE: Control who/what can do what in the cluster.
+#
+# WHAT YOU'LL LEARN:
+#   - ServiceAccounts (identities for pods — like user accounts for processes)
+#   - Roles vs ClusterRoles (namespace-scoped vs cluster-scoped)
+#   - RoleBindings (attach a Role to a ServiceAccount)
+#   - Principle of least privilege in Kubernetes
+# =============================================================================
+
+# ─── ServiceAccounts ─────────────────────────────────────────────────────────
+# Every pod should have its own ServiceAccount — NOT use the default one.
+# This allows fine-grained permissions per service.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-gateway
+  namespace: microservices
+  annotations:
+    # Azure Workload Identity: binds K8s SA to Azure Managed Identity.
+    # Pods with this SA can authenticate to Azure services (Key Vault!)
+    # WITHOUT any passwords or secrets in the pod!
+    azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+automountServiceAccountToken: true
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: user-service
+  namespace: microservices
+  annotations:
+    azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: task-service
+  namespace: microservices
+  annotations:
+    azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: notification-service
+  namespace: microservices
+  annotations:
+    azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+
+---
+# ─── Role: read-secrets ───────────────────────────────────────────────────────
+# A Role defines what actions are allowed on what resources.
+# This role allows reading Secrets — needed by services to get DB passwords
+# from Kubernetes Secrets (injected from Key Vault via CSI driver).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: secret-reader
+  namespace: microservices
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]   # read-only! No create/update/delete.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+
+---
+# ─── RoleBinding: bind secret-reader to each service's SA ────────────────────
+# A RoleBinding grants a Role to subjects (users, groups, or ServiceAccounts).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: services-can-read-secrets
+  namespace: microservices
+subjects:
+  - kind: ServiceAccount
+    name: api-gateway
+    namespace: microservices
+  - kind: ServiceAccount
+    name: user-service
+    namespace: microservices
+  - kind: ServiceAccount
+    name: task-service
+    namespace: microservices
+  - kind: ServiceAccount
+    name: notification-service
+    namespace: microservices
+roleRef:
+  kind: Role
+  name: secret-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ─── ClusterRole: Prometheus scraper ─────────────────────────────────────────
+# Prometheus needs cluster-wide read access to discover pods and scrape metrics.
+# ClusterRole (vs Role) applies cluster-wide, not just one namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-scraper
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions", "networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-scraper
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: prometheus-scraper
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,176 @@
+# =============================================================================
+# KUBERNETES: NetworkPolicy
+# PURPOSE: Control which pods can talk to which other pods.
+#          By default, ALL pods can reach ALL other pods (bad for security!).
+#          NetworkPolicies act as microsegmentation firewalls.
+#
+# WHAT YOU'LL LEARN:
+#   - Default-deny posture (deny all, then allow what you need)
+#   - Pod selector labels as firewall rules
+#   - Namespace selectors (cross-namespace communication)
+#   - Ingress vs Egress policies
+# =============================================================================
+
+# ─── Default Deny All ────────────────────────────────────────────────────────
+# This is the baseline: deny ALL ingress AND egress for every pod in the
+# namespace. Then we add specific "allow" policies below.
+# 
+# This means a newly deployed pod has ZERO network access until explicitly allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: microservices
+spec:
+  podSelector: {}  # {} = select ALL pods in namespace
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# ─── Allow DNS ───────────────────────────────────────────────────────────────
+# Every pod needs DNS to resolve service names like "user-service.microservices.svc.cluster.local"
+# DNS runs in kube-system namespace on port 53.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: microservices
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# ─── API Gateway: allow ingress from NGINX Ingress Controller ────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-api-gateway
+  namespace: microservices
+spec:
+  podSelector:
+    matchLabels:
+      app: api-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# ─── User Service: only api-gateway can call it ───────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-gateway-to-user-service
+  namespace: microservices
+spec:
+  podSelector:
+    matchLabels:
+      app: user-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 8001
+
+---
+# ─── Task Service: only api-gateway can call it ───────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-gateway-to-task-service
+  namespace: microservices
+spec:
+  podSelector:
+    matchLabels:
+      app: task-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 8002
+
+---
+# ─── Allow all services to reach PostgreSQL (egress) ─────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-postgres
+  namespace: microservices
+spec:
+  podSelector:
+    matchLabels:
+      needs-db: "true"   # Only pods with this label can reach the DB
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# ─── Allow all services to reach Redis ───────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-redis
+  namespace: microservices
+spec:
+  podSelector:
+    matchLabels:
+      needs-cache: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 6380   # Azure Redis uses 6380 for TLS
+
+---
+# ─── Allow Prometheus to scrape metrics from all pods ────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scraping
+  namespace: microservices
+spec:
+  podSelector: {}   # All pods expose /metrics
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 8001
+        - protocol: TCP
+          port: 8002
+        - protocol: TCP
+          port: 8003

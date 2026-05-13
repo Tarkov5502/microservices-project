@@ -1,0 +1,72 @@
+# values.yaml — default values for the api-gateway chart.
+# Override these per environment:
+#   helm upgrade --install api-gateway ./helm/api-gateway \
+#     --set image.tag=abc1234 \
+#     --set replicaCount=3
+
+replicaCount: 2
+
+image:
+  repository: REPLACE_ACR_LOGIN_SERVER/api-gateway
+  pullPolicy: Always
+  tag: "latest"   # CI/CD will override this with the git SHA
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+env:
+  ENVIRONMENT: production
+  USER_SERVICE_URL: "http://user-service:8001"
+  TASK_SERVICE_URL: "http://task-service:8002"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:8003"
+
+secretName: app-secrets
+
+livenessProbe:
+  path: /health
+  port: 8000
+  initialDelaySeconds: 15
+  periodSeconds: 30
+
+readinessProbe:
+  path: /health/ready
+  port: 8000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+
+nodeSelector: {}
+
+tolerations:
+  - key: "workload"
+    operator: "Equal"
+    value: "app"
+    effect: "NoSchedule"
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app: api-gateway

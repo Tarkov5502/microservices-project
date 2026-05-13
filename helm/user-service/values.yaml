@@ -1,0 +1,31 @@
+replicaCount: 2
+image:
+  repository: REPLACE_ACR_LOGIN_SERVER/user-service
+  pullPolicy: Always
+  tag: "latest"
+service:
+  type: ClusterIP
+  port: 8001
+  targetPort: 8001
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+secretName: app-secrets
+env:
+  ENVIRONMENT: production
+  JWT_EXPIRY_MINUTES: "60"
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8001"
+tolerations:
+  - key: workload
+    operator: Equal
+    value: app
+    effect: NoSchedule
+livenessProbe:  { path: /health, port: 8001, initialDelaySeconds: 20, periodSeconds: 30 }
+readinessProbe: { path: /health/ready, port: 8001, initialDelaySeconds: 10, periodSeconds: 10 }
