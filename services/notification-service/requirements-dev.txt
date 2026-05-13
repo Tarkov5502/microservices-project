@@ -1,0 +1,6 @@
+# requirements-dev.txt — test dependencies, NOT in the production image.
+# pytest-asyncio is CRITICAL here: without it, @pytest.mark.asyncio is unknown
+# and async tests are silently treated as synchronous (they pass without running
+# any of the async body, which is worse than failing).
+pytest==8.2.0
+pytest-asyncio==0.23.7

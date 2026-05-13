@@ -1,4 +1,12 @@
-"""User CRUD routes."""
+"""
+User CRUD routes.
+
+FIX: password hashing in update_me was synchronous (bcrypt.hashpw is CPU-bound,
+~300ms per call with rounds=12). Running it on the asyncio event loop stalls
+ALL concurrent requests for its entire duration. asyncio.to_thread() offloads
+the blocking call to a thread-pool worker.
+"""
+import asyncio
 import uuid
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Header
@@ -80,9 +88,11 @@ async def update_me(
     if payload.full_name is not None:
         user.full_name = payload.full_name
     if payload.password is not None:
-        user.hashed_password = bcrypt.hashpw(
-            payload.password.encode(), bcrypt.gensalt(rounds=12)
-        ).decode()
+        # FIX: use asyncio.to_thread so bcrypt doesn't block the event loop.
+        # See auth.py for the full explanation of why this matters.
+        user.hashed_password = await asyncio.to_thread(
+            lambda: bcrypt.hashpw(payload.password.encode(), bcrypt.gensalt(rounds=12)).decode()
+        )
     await db.flush()
     await db.refresh(user)
     return UserResponse.model_validate(user)

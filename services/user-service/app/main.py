@@ -23,10 +23,25 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("User Service starting — creating tables if needed...")
+    """
+    MIGRATION STRATEGY:
+    We run 'alembic upgrade head' via the entrypoint.sh script BEFORE uvicorn
+    starts. That means by the time this lifespan function runs, the schema is
+    already at the correct version.
+
+    The create_all() call below is a FALLBACK for local development without
+    the entrypoint script (e.g., running 'uvicorn app.main:app' directly).
+    In production (Docker/K8s), entrypoint.sh runs Alembic first, so this
+    create_all() is a no-op (tables already exist).
+
+    This dual approach means:
+      - Local dev: works without running alembic manually
+      - Production: Alembic runs first, schema is versioned and auditable
+    """
+    logger.info("User Service starting...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables ready")
+    logger.info("Database ready")
     yield
     logger.info("User Service shutting down")
     await engine.dispose()

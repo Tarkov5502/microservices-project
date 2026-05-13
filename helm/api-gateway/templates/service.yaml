@@ -5,6 +5,10 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: {{ .Release.Name }}
+    # This label is required for the Prometheus ServiceMonitor selector
+    # defined in kubernetes/monitoring/monitoring.yaml to auto-discover this service.
+    # Without it, Prometheus scrapes nothing regardless of podAnnotations.
+    monitoring: "true"
 spec:
   selector:
     app: {{ .Release.Name }}

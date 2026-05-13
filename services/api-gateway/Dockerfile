@@ -2,8 +2,8 @@
 # Multi-stage builds: Stage 1 compiles/installs deps, Stage 2 is the lean image.
 # Result: smaller final image (no build tools included).
 FROM python:3.12-slim AS builder
-
-# Install uv for fast dependency resolution
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 RUN pip install --no-cache-dir uv==0.2.0
 
 WORKDIR /build

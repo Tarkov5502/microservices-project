@@ -116,8 +116,11 @@ resource "azurerm_kubernetes_cluster" "main" {
   tags = var.tags
 
   lifecycle {
-    # Prevent accidental cluster destruction in production
-    prevent_destroy = false # Set to true in real production!
+    # SAFETY: prevent_destroy stops 'terraform destroy' from deleting the cluster
+    # unless you first remove this block and re-apply. This is a deliberate
+    # friction point that prevents a single mistyped command from erasing a
+    # production cluster. Set to false ONLY in dev/test environments.
+    prevent_destroy = true
     ignore_changes = [
       default_node_pool[0].node_count, # Autoscaler manages this
     ]

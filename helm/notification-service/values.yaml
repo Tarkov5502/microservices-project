@@ -1,7 +1,7 @@
 replicaCount: 1
 image:
   repository: REPLACE_ACR_LOGIN_SERVER/notification-service
-  pullPolicy: Always
+  pullPolicy: IfNotPresent
   tag: "latest"
 service:
   type: ClusterIP

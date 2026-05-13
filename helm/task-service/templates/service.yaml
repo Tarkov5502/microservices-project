@@ -3,6 +3,9 @@ kind: Service
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+    monitoring: "true"  # Required for ServiceMonitor auto-discovery
 spec:
   selector:
     app: {{ .Release.Name }}

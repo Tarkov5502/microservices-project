@@ -8,8 +8,13 @@ replicaCount: 2
 
 image:
   repository: REPLACE_ACR_LOGIN_SERVER/api-gateway
-  pullPolicy: Always
-  tag: "latest"   # CI/CD will override this with the git SHA
+  # IfNotPresent: use the cached image if the exact tag exists on the node.
+  # With immutable SHA-pinned tags from CI, Always forces a registry roundtrip
+  # on every pod restart. If ACR is degraded, Always prevents pods from
+  # restarting even though the image is already on the node. Use Always only
+  # with mutable tags like 'latest' — which you should never use in production.
+  pullPolicy: IfNotPresent
+  tag: "latest"   # CI/CD overrides this with the git SHA on every deploy
 
 service:
   type: ClusterIP

@@ -1,7 +1,7 @@
 replicaCount: 2
 image:
   repository: REPLACE_ACR_LOGIN_SERVER/user-service
-  pullPolicy: Always
+  pullPolicy: IfNotPresent  # See api-gateway/values.yaml for explanation
   tag: "latest"
 service:
   type: ClusterIP

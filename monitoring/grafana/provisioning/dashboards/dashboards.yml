@@ -1,0 +1,13 @@
+# monitoring/grafana/provisioning/dashboards/dashboards.yml
+# Tells Grafana to auto-load all JSON files from the /dashboards directory.
+apiVersion: 1
+
+providers:
+  - name: microservices
+    orgId: 1
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

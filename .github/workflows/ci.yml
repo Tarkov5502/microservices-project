@@ -65,8 +65,14 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv
+          # Install runtime dependencies
           uv pip install --system -r requirements.txt
-          uv pip install --system ruff pytest pytest-asyncio httpx
+          # Install test dependencies from requirements-dev.txt.
+          # These are intentionally separate: test tools (pytest, httpx) are
+          # never shipped in production images, only in CI.
+          uv pip install --system -r requirements-dev.txt
+          # Linting tools (pinned to match any local pre-commit hooks)
+          uv pip install --system ruff
 
       - name: Lint with ruff
         run: ruff check app/ --output-format=github
