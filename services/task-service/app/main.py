@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import engine, Base
 from app.routes.tasks import router as tasks_router, close_sender
 from app.routes.projects import router as projects_router
+from app.telemetry import init_telemetry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -19,14 +20,21 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Task Service starting — creating tables...")
+    """
+    MIGRATION STRATEGY (identical to user-service):
+    Alembic runs via entrypoint.sh BEFORE uvicorn starts, so the schema
+    is already at head by the time this function runs. The create_all()
+    below is a dev fallback for running uvicorn directly without entrypoint.sh.
+    """
+    logger.info("Task Service starting...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Tables ready")
+    logger.info("Database ready")
+    init_telemetry(app, service_name="task-service", db_engine=engine)
     yield
-    # Cleanly drain and close the shared Service Bus sender
     await close_sender()
     await engine.dispose()
+    logger.info("Task Service stopped")
 
 
 app = FastAPI(

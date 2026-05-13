@@ -1,0 +1,104 @@
+# .github/dependabot.yml
+#
+# Dependabot: GitHub's automated dependency update bot.
+#
+# WHY DEPENDABOT?
+#   Dependencies age silently. A package you pinned to version X in January
+#   may have a published CVE by March. Without automated scanning, you only
+#   discover this when a penetration test or security audit surfaces it.
+#
+#   Dependabot opens PRs weekly (or daily for security patches) with pinned
+#   version bumps. Combined with the Trivy scan in CI, every Dependabot PR
+#   is automatically scanned before merge. You get continuous security hygiene
+#   with zero manual effort.
+#
+# LEARNING:
+#   - 'open-pull-requests-limit': caps simultaneous open PRs so your queue
+#     doesn't flood with 50 updates at once.
+#   - 'target-branch': Dependabot targets 'develop' so updates go through PR
+#     review before hitting main.
+#   - 'groups': clusters related updates (e.g. all opentelemetry-* packages)
+#     into a single PR instead of one per package.
+#
+# IMPORTANT: Dependabot must be enabled in repo Settings → Security & Analysis
+
+version: 2
+updates:
+
+  # ─── Python: api-gateway ──────────────────────────────────────────────────
+  - package-ecosystem: pip
+    directory: /services/api-gateway
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    target-branch: develop
+    labels: [dependencies, api-gateway]
+    groups:
+      opentelemetry:
+        patterns: ["opentelemetry-*"]
+
+  # ─── Python: user-service ─────────────────────────────────────────────────
+  - package-ecosystem: pip
+    directory: /services/user-service
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    target-branch: develop
+    labels: [dependencies, user-service]
+    groups:
+      opentelemetry:
+        patterns: ["opentelemetry-*"]
+
+  # ─── Python: task-service ─────────────────────────────────────────────────
+  - package-ecosystem: pip
+    directory: /services/task-service
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    target-branch: develop
+    labels: [dependencies, task-service]
+    groups:
+      opentelemetry:
+        patterns: ["opentelemetry-*"]
+
+  # ─── Python: notification-service ─────────────────────────────────────────
+  - package-ecosystem: pip
+    directory: /services/notification-service
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    target-branch: develop
+    labels: [dependencies, notification-service]
+
+  # ─── GitHub Actions ────────────────────────────────────────────────────────
+  # Dependabot keeps action SHAs up to date, including the ones we pinned in ci.yml.
+  # When a new release of (e.g.) actions/checkout is published, Dependabot opens
+  # a PR that updates the SHA to the new release's commit.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    target-branch: develop
+    labels: [dependencies, github-actions]
+
+  # ─── Terraform ─────────────────────────────────────────────────────────────
+  - package-ecosystem: terraform
+    directory: /terraform
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "09:00"
+    open-pull-requests-limit: 3
+    target-branch: develop
+    labels: [dependencies, terraform]

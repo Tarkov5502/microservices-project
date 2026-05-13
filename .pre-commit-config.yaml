@@ -1,0 +1,81 @@
+# .pre-commit-config.yaml
+#
+# Pre-commit hooks: run validation checks before every 'git commit'.
+# Catches formatting issues, secrets, and linting errors LOCALLY before
+# they ever reach CI — tightening the feedback loop from minutes to seconds.
+#
+# SETUP:
+#   pip install pre-commit
+#   pre-commit install          # install the git hook
+#   pre-commit run --all-files  # run manually on all files
+#
+# HOW IT WORKS:
+#   Each hook is a separate process that runs against staged files.
+#   If any hook fails, the commit is rejected with an explanation.
+#   The developer fixes the issue and commits again.
+#   Most hooks auto-fix — so 'git add .' + 'git commit' is the loop.
+#
+# LEARNING: The 'detect-secrets' hook scans for patterns matching API keys,
+#   connection strings, JWTs, and private keys. It uses a .secrets.baseline
+#   file to track known false positives. Run:
+#     detect-secrets scan > .secrets.baseline
+#   to initialise, then review and commit the baseline.
+
+repos:
+
+  # ─── General file hygiene ─────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace    # Remove trailing spaces
+      - id: end-of-file-fixer      # Ensure files end with a newline
+      - id: check-yaml             # Validate all YAML files
+      - id: check-json             # Validate all JSON files
+      - id: check-toml             # Validate all TOML files
+      - id: check-merge-conflict   # Block accidental merge conflict markers
+      - id: check-case-conflict    # Catch case-sensitive filename issues on macOS
+      - id: check-added-large-files
+        args: [--maxkb, "500"]     # Block files > 500KB (accidentally committing test data)
+      - id: detect-private-key     # Block PEM private keys from being committed
+      - id: debug-statements       # Block 'import pdb; pdb.set_trace()' commits
+      - id: mixed-line-ending      # Normalise CRLF → LF
+        args: [--fix, lf]
+
+  # ─── Python: ruff (linting + formatting) ──────────────────────────────────
+  # ruff replaces flake8, isort, and pyupgrade in a single tool.
+  # Running ruff before committing means CI lint never fails on formatting.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--fix]              # Auto-fix safe issues
+      - id: ruff-format            # Apply ruff's formatter (Black-compatible)
+
+  # ─── Secret detection ─────────────────────────────────────────────────────
+  # Scans for patterns matching: AWS keys, Azure connection strings, JWTs,
+  # GitHub tokens, Stripe keys, private keys, and more.
+  # Won't block commits once you've added a false positive to .secrets.baseline.
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: |
+          (?x)^(
+            .*\.lock$|
+            .*requirements.*\.txt$|
+            \.secrets\.baseline$
+          )$
+
+  # ─── Terraform ────────────────────────────────────────────────────────────
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.90.0
+    hooks:
+      - id: terraform_fmt         # Auto-format HCL
+      - id: terraform_validate    # Validate syntax (no backend required)
+
+  # ─── Helm ─────────────────────────────────────────────────────────────────
+  - repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.23
+    hooks:
+      - id: helmlint

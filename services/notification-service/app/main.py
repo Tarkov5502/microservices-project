@@ -16,6 +16,7 @@ from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
 from app.consumer import ServiceBusConsumer
+from app.telemetry import init_telemetry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ _consumer_task: asyncio.Task | None = None
 async def lifespan(app: FastAPI):
     global _consumer_task
     logger.info("Notification Service starting...")
+
+    init_telemetry(app, service_name="notification-service")
 
     if settings.servicebus_connection_string:
         consumer = ServiceBusConsumer(

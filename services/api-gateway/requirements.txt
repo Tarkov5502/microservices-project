@@ -7,3 +7,16 @@ prometheus-client==0.20.0
 # hiredis: C extension for the Redis protocol parser — ~10x faster than the
 # pure-Python implementation for high-throughput rate-limit checks.
 redis[hiredis]==5.0.4
+
+# ── OpenTelemetry distributed tracing ─────────────────────────────────────────
+# opentelemetry-sdk:                       Core SDK (TracerProvider, spans)
+# opentelemetry-instrumentation-fastapi:   Auto-spans for every HTTP route
+# opentelemetry-instrumentation-httpx:     Auto-spans for every outbound HTTP call
+# opentelemetry-exporter-otlp-proto-grpc:  Export spans to OTEL Collector / Jaeger
+#
+# These are OPTIONAL at runtime — telemetry.py catches ImportError and
+# gracefully disables tracing if these aren't installed.
+opentelemetry-sdk==1.24.0
+opentelemetry-instrumentation-fastapi==0.45b0
+opentelemetry-instrumentation-httpx==0.45b0
+opentelemetry-exporter-otlp-proto-grpc==1.24.0

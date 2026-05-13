@@ -21,6 +21,10 @@ spec:
     metadata:
       labels:
         app: {{ .Release.Name }}
+        # FIX: needs-cache enables the Redis egress NetworkPolicy.
+        # Without this label, pods cannot reach Azure Cache for Redis —
+        # the rate limiter silently falls back to in-memory every single time.
+        needs-cache: "true"
       annotations:
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:

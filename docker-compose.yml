@@ -77,9 +77,10 @@ services:
       ENVIRONMENT: development
       DATABASE_URL: "postgresql://appuser:apppassword@postgres:5432/userdb"
       REDIS_URL: "redis://redis:6379"
-      # Deveak secret is allowed (config.py skips validation in dev)
       JWT_SECRET: "dev-only-secret-change-in-production-please"
       JWT_EXPIRY_MINUTES: "60"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_SERVICE_NAME: "user-service"
     ports:
       - "8001:8001"
     depends_on:
@@ -104,6 +105,8 @@ services:
       ENVIRONMENT: development
       DATABASE_URL: "postgresql://appuser:apppassword@postgres:5432/taskdb"
       REDIS_URL: "redis://redis:6379"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_SERVICE_NAME: "task-service"
       # SERVICEBUS_CONNECTION_STRING intentionally omitted — events log locally
     ports:
       - "8002:8002"
@@ -127,9 +130,9 @@ services:
       dockerfile: Dockerfile
     environment:
       ENVIRONMENT: development
-      # SERVICEBUS_CONNECTION_STRING left empty = consumer disabled (graceful local dev mode)
-      # Set this to your Azure Service Bus connection string to enable event processing
       SERVICEBUS_CONNECTION_STRING: ""
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_SERVICE_NAME: "notification-service"
     ports:
       - "8003:8003"
     healthcheck:
@@ -158,6 +161,8 @@ services:
       # Without this, each replica has an independent bucket and the effective
       # limit is N × RATE_LIMIT_REQUESTS where N = number of running pods.
       REDIS_URL: "redis://redis:6379"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_SERVICE_NAME: "api-gateway"
     ports:
       - "8000:8000"
     depends_on:
@@ -167,6 +172,8 @@ services:
         condition: service_healthy
       notification-service:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
       interval: 10s
@@ -177,6 +184,24 @@ services:
     restart: unless-stopped
 
   # ─── Observability ───────────────────────────────────────────────────────────
+
+  # Jaeger: all-in-one distributed tracing backend.
+  # Receives OTLP spans from all four services and displays them as trace waterfalls.
+  # Access the UI at http://localhost:16686
+  #
+  # LEARNING: Open the Jaeger UI, make an API request, then search for the trace.
+  # You'll see every hop: gateway → service → database, with exact durations.
+  # This is how you find slow queries and unexpected network hops in production.
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+    networks:
+      - backend
 
   prometheus:
     image: prom/prometheus:v2.51.2

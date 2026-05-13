@@ -2,12 +2,22 @@
 api-gateway/app/main.py
 
 The API Gateway is the single entry point for all client requests.
-It validates JWTs, applies rate limiting, and proxies requests to
-the appropriate backend microservice.
+Validates JWTs, applies rate limiting, proxies requests to backend services.
 
 Architecture pattern: Gateway Aggregation / Backend for Frontend (BFF)
-"""
 
+RESILIENCE STACK (innermost → outermost on request path):
+  JWTAuth → Correlation → RateLimiter → CORS → SecurityHeaders → [client]
+
+  JWTAuth validates the token and injects user identity into request.state.
+  Correlation generates or validates X-Request-ID for end-to-end tracing.
+  RateLimiter enforces per-IP sliding windows, backed by Redis.
+  CORS enforces origin allowlist.
+  SecurityHeaders adds HSTS, CSP, X-Frame-Options to every response.
+
+  Proxy layer (proxy.py) adds circuit breaker + retry on top of this stack.
+"""
+import asyncio
 import time
 import logging
 from contextlib import asynccontextmanager
@@ -22,6 +32,9 @@ from app.routes.proxy import router as proxy_router
 from app.middleware.auth import JWTAuthMiddleware
 from app.middleware.rate_limiter import RateLimiterMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.middleware.correlation import CorrelationMiddleware
+from app.circuit_breaker import registry as cb_registry
+from app.telemetry import init_telemetry
 
 # ─── Logging Setup ────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -31,9 +44,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─── Prometheus Metrics ───────────────────────────────────────────────────────
-# Metrics are automatically scraped by Prometheus via the /metrics endpoint.
-# Counters: monotonically increasing (never decrease)
-# Histograms: measure distribution (latency buckets)
 REQUEST_COUNT = Counter(
     "gateway_requests_total",
     "Total requests processed by the API gateway",
@@ -47,71 +57,59 @@ REQUEST_LATENCY = Histogram(
 )
 
 # ─── HTTP Client Pool ─────────────────────────────────────────────────────────
-# We reuse an httpx.AsyncClient for all outbound requests to backend services.
-# Connection pooling is critical — creating a new connection per request is slow!
 http_client: httpx.AsyncClient | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown lifecycle handler."""
     global http_client
     logger.info("API Gateway starting up...")
 
-    # Create the shared HTTP client with connection pooling
     http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(30.0),
         limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
     )
     logger.info("HTTP client pool initialized")
-    yield  # Application runs here
 
-    # Cleanup on shutdown
+    # Initialise distributed tracing — no-op if OTEL_EXPORTER_OTLP_ENDPOINT unset
+    init_telemetry(app, service_name="api-gateway", instrument_httpx=True)
+
+    yield
+
     logger.info("API Gateway shutting down...")
     await http_client.aclose()
     logger.info("HTTP client pool closed")
 
 
-# ─── FastAPI App ────────────────────────────────────────────
+# ─── FastAPI App ───────────────────────────────────────────────────────────────
 _is_prod = settings.environment == "production"
 app = FastAPI(
     title="API Gateway",
     description="Central entry point for the microservices platform",
     version="1.0.0",
-    # FIX #5: Hiding /docs is not enough — /openapi.json is its own endpoint
-    # and gives attackers a complete map of every route and schema.
-    # Both must be disabled in production.
     docs_url="/docs" if not _is_prod else None,
     redoc_url=None,
     openapi_url="/openapi.json" if not _is_prod else None,
     lifespan=lifespan,
 )
 
-# ─── Middleware Stack (order matters — last added = first executed) ────────
-#
-# Execution order (innermost → outermost on request path):
-#   JWTAuth → RateLimiter → CORS → SecurityHeaders → [client]
-#
-# Execution order on response path (reversed):
-#   [route handler] → JWTAuth → RateLimiter → CORS → SecurityHeaders → [client]
-#
-# SecurityHeaders is OUTERMOST so it applies its headers last,
-# meaning no inner middleware can accidentally override them.
+# ─── Middleware Stack ──────────────────────────────────────────────────────────
+# Starlette applies middleware in LIFO order (last added = first to execute
+# on the request path). Reading top-to-bottom:
+#   SecurityHeaders → CORS → RateLimiter → Correlation → JWTAuth → [route]
+# On response path it's reversed:
+#   [route] → JWTAuth → Correlation → RateLimiter → CORS → SecurityHeaders
 
-# FIX #6: Apply security headers to every response.
 app.add_middleware(SecurityHeadersMiddleware)
 
-# SECURITY: Do NOT combine allow_origins=["*"] with allow_credentials=True.
-# Starlette 0.37+ raises ValueError on startup for that combination.
-# This gateway does not use cookie-based auth, so credentials=False is correct.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins or [],  # Must be set via env var in prod
+    allow_origins=settings.allowed_origins or [],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
 )
-# FIX #1: Pass auth_max_requests so login/register get a tighter bucket.
+
 app.add_middleware(
     RateLimiterMiddleware,
     max_requests=settings.rate_limit_requests,
@@ -119,6 +117,11 @@ app.add_middleware(
     auth_max_requests=settings.auth_rate_limit_requests,
     redis_url=settings.redis_url,
 )
+
+# CorrelationMiddleware runs BEFORE JWTAuth so the request_id is available
+# to the auth middleware for inclusion in audit log lines.
+app.add_middleware(CorrelationMiddleware)
+
 app.add_middleware(
     JWTAuthMiddleware,
     exempt_paths=["/health", "/health/ready", "/metrics"],
@@ -145,9 +148,6 @@ async def record_metrics(request: Request, call_next):
         path=request.url.path,
     ).observe(elapsed)
 
-    # NOTE: X-Response-Time removed in production — response timing leaks
-    # allow attackers to infer server-side behaviour (e.g. whether a user
-    # exists by comparing bcrypt timing). Keep it only in non-prod.
     if settings.environment != "production":
         response.headers["X-Response-Time"] = f"{elapsed:.4f}s"
     return response
@@ -162,7 +162,14 @@ async def liveness() -> dict:
 
 @app.get("/health/ready", tags=["Health"])
 async def readiness() -> dict:
-    """Kubernetes readiness probe — can we handle requests?"""
+    """
+    Kubernetes readiness probe — can we handle requests?
+
+    Reports:
+      - http_client initialisation status
+      - upstream service reachability (all three, in parallel)
+      - circuit breaker state per upstream (CLOSED/OPEN/HALF_OPEN)
+    """
     if http_client is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -176,37 +183,39 @@ async def readiness() -> dict:
     }
 
     async def _check(name: str, url: str) -> str | None:
-        """Return service name if unhealthy, None if healthy."""
         try:
             resp = await http_client.get(f"{url}/health", timeout=5.0)
             return name if resp.status_code != 200 else None
         except Exception:
             return name
 
-    # FIX: check all services concurrently, not sequentially.
-    # Sequential: total time = sum(each probe timeout).
-    # Concurrent: total time = max(any probe timeout).
+    # Concurrent health checks — total time = max(single probe), not sum
     results = await asyncio.gather(*[_check(n, u) for n, u in services.items()])
     unhealthy = [r for r in results if r is not None]
+
+    breaker_states = cb_registry.all_states()
 
     if unhealthy:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"status": "degraded", "unhealthy": unhealthy},
+            detail={
+                "status": "degraded",
+                "unhealthy": unhealthy,
+                "circuit_breakers": breaker_states,
+            },
         )
-    return {"status": "ready", "services": list(services.keys())}
+    return {
+        "status": "ready",
+        "services": list(services.keys()),
+        "circuit_breakers": breaker_states,
+    }
 
 
 @app.get("/metrics", include_in_schema=False)
 async def metrics(request: Request):
     """
     Prometheus metrics endpoint.
-
-    SECURITY: Only accessible from within the cluster. The NGINX Ingress
-    Controller is configured to return 403 for external requests to /metrics
-    via the 'server-snippet' annotation. This application-level guard is a
-    second line of defence — check for the absence of X-Forwarded-For which
-    is set by the ingress for all externally-originated requests.
+    Only accessible from within the cluster (no X-Forwarded-For header).
     """
     if request.headers.get("x-forwarded-for"):
         raise HTTPException(
