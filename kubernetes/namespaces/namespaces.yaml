@@ -20,9 +20,13 @@ metadata:
     name: microservices
     # Istio label — if you later add a service mesh, this enables sidecar injection
     istio-injection: disabled
-    # PodSecurity label: enforce security standards at namespace level
+    # PodSecurity label: enforce security standards at namespace level.
+    # Both enforce and audit use 'baseline' — if audit were set to 'restricted'
+    # while we only enforce 'baseline', every pod would generate audit log
+    # noise for restrictions that aren't actually enforced (misleading).
     pod-security.kubernetes.io/enforce: baseline
-    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
 
 ---
 # ResourceQuota: limits the TOTAL resources consumed in the namespace.

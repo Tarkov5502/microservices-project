@@ -22,18 +22,22 @@ resource "azurerm_redis_cache" "main" {
   sku_name            = var.redis_sku
 
   # Force TLS — never send data to Redis in plaintext!
-  enable_non_ssl_port = false
-  minimum_tls_version = "1.2"
+  # NOTE: 'enable_non_ssl_port' was renamed to 'non_ssl_port_enabled' in
+  # azurerm v3.x. Using the correct name prevents a perpetual diff.
+  non_ssl_port_enabled = false
+  minimum_tls_version  = "1.2"
 
   redis_configuration {
     # Maximum memory policy: when Redis is full, which keys get evicted?
     # allkeys-lru = Least Recently Used (good general default for caching)
     maxmemory_policy = "allkeys-lru"
 
-    # Persist data to disk (RDB snapshots) — for session data you want this!
-    rdb_backup_enabled            = var.enable_rdb_backup
-    rdb_backup_frequency          = 60   # minutes
-    rdb_backup_max_snapshot_count = 1
+    # RDB backup only works on Premium SKU. For Basic/Standard we leave it
+    # disabled entirely. Trying to set frequency/snapshot_count without
+    # Premium causes an API 400 error from the provider.
+    rdb_backup_enabled            = false
+    rdb_backup_frequency          = var.enable_rdb_backup ? 60 : 0
+    rdb_backup_max_snapshot_count = var.enable_rdb_backup ? 1 : 0
   }
 
   tags = var.tags

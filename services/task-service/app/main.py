@@ -11,7 +11,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
 from app.database import engine, Base
-from app.routes.tasks import router as tasks_router
+from app.routes.tasks import router as tasks_router, close_sender
 from app.routes.projects import router as projects_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -25,6 +25,8 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Tables ready")
     yield
+    # Cleanly drain and close the shared Service Bus sender
+    await close_sender()
     await engine.dispose()
 
 

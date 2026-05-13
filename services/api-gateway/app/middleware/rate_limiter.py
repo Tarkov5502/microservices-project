@@ -1,12 +1,16 @@
 """
 In-memory sliding window rate limiter middleware.
 
-For production, swap the in-memory dict for a Redis-backed counter
+For production, swap the in-memory store for a Redis-backed counter
 so limits are shared across multiple gateway replicas.
+
+Memory safety: the _buckets dict is bounded by MAX_TRACKED_IPS via an LRU
+eviction strategy. Without a bound, every unique IP that ever hit the server
+would accumulate an entry and the process would leak memory indefinitely.
 """
 import time
 import logging
-from collections import defaultdict, deque
+from collections import deque
 from typing import Callable
 
 from fastapi import Request, Response, status
@@ -15,21 +19,41 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of unique client IPs tracked simultaneously.
+# When exceeded, the oldest-seen IP entry is evicted (LRU policy).
+MAX_TRACKED_IPS = 10_000
+
 
 class RateLimiterMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, max_requests: int = 100, window_seconds: int = 60):
         super().__init__(app)
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        # ip → deque of request timestamps within the window
-        self._buckets: dict[str, deque] = defaultdict(deque)
+        # Insertion-ordered dict: use as an LRU cache by moving accessed keys
+        # to the end and evicting from the front when over MAX_TRACKED_IPS.
+        self._buckets: dict[str, deque] = {}
+
+    def _get_bucket(self, ip: str) -> deque:
+        """Return the request-timestamp deque for an IP, applying LRU eviction."""
+        if ip in self._buckets:
+            # Move to end (mark as recently used)
+            bucket = self._buckets.pop(ip)
+            self._buckets[ip] = bucket
+            return bucket
+        # New IP — evict oldest entry if at capacity
+        if len(self._buckets) >= MAX_TRACKED_IPS:
+            oldest_ip = next(iter(self._buckets))
+            del self._buckets[oldest_ip]
+        bucket: deque = deque()
+        self._buckets[ip] = bucket
+        return bucket
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        client_ip = request.client.host
+        client_ip = request.client.host if request.client else "unknown"
         now = time.monotonic()
-        bucket = self._buckets[client_ip]
+        bucket = self._get_bucket(client_ip)
 
-        # Evict timestamps older than the window
+        # Evict timestamps outside the sliding window
         while bucket and bucket[0] < now - self.window_seconds:
             bucket.popleft()
 

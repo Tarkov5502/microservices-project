@@ -57,10 +57,17 @@ class ServiceBusConsumer:
 
     async def _consume_all_topics(self) -> None:
         async with ServiceBusClient.from_connection_string(self.connection_string) as client:
-            # Run one receiver per topic concurrently
-            await asyncio.gather(
-                *[self._receive_from_topic(client, topic) for topic in self.topics]
+            # return_exceptions=True is critical: without it, if one topic receiver
+            # raises an exception, gather() immediately cancels ALL other receivers.
+            # With it, each receiver's result (or exception) is returned independently
+            # so a failure on user-events doesn't kill the task-events receiver.
+            results = await asyncio.gather(
+                *[self._receive_from_topic(client, topic) for topic in self.topics],
+                return_exceptions=True,
             )
+            for topic, result in zip(self.topics, results):
+                if isinstance(result, Exception):
+                    logger.error("Receiver for topic '%s' failed: %s", topic, result)
 
     async def _receive_from_topic(self, client: ServiceBusClient, topic: str) -> None:
         async with client.get_subscription_receiver(

@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# A pre-computed bcrypt hash of a throwaway string used for timing-safe
+# rejection. When a user is not found we still run bcrypt.checkpw() against
+# this dummy hash so the response time is indistinguishable from a valid but
+# wrong-password attempt, preventing email enumeration via timing analysis.
+_DUMMY_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=12)).decode()
+
+
 def _hash_password(plain: str) -> str:
     """bcrypt hash — each call generates a unique salt."""
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(rounds=12)).decode()
@@ -74,8 +81,13 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
-    # Constant-time check to prevent timing attacks
-    if not user or not _verify_password(payload.password, user.hashed_password):
+    # SECURITY: Always run bcrypt regardless of whether the user exists.
+    # Short-circuiting when user is None leaks valid email addresses through
+    # measurably different response times (timing attack / user enumeration).
+    candidate_hash = user.hashed_password if user else _DUMMY_HASH
+    password_ok = _verify_password(payload.password, candidate_hash)
+
+    if not user or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -83,7 +95,6 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
 
-    # Update last login timestamp
     user.last_login_at = datetime.now(timezone.utc)
     token, expires_in = _create_jwt(user)
     return TokenResponse(

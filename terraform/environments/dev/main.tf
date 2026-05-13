@@ -61,11 +61,13 @@ resource "azurerm_resource_group" "main" {
 # TERRAFORM CONCEPT — Locals:
 # Computed values derived from variables. Used to avoid repetition (DRY!).
 locals {
+  # NOTE: Do NOT use timestamp() here — it is non-deterministic and causes
+  # a perpetual diff on every terraform plan/apply, making Terraform think
+  # resources need to be updated every single run.
   common_tags = merge(var.tags, {
     Environment = var.environment
     Project     = var.project_name
     ManagedBy   = "Terraform"
-    CreatedDate = timestamp()
   })
 }
 

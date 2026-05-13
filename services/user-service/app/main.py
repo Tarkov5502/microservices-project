@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
 from app.database import engine, Base
@@ -20,9 +20,6 @@ from app.routes.users import router as users_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
-
-REQUEST_COUNT = Counter("user_service_requests_total", "Total requests", ["method", "path", "status"])
-REQUEST_LATENCY = Histogram("user_service_request_duration_seconds", "Latency", ["method", "path"])
 
 
 @asynccontextmanager

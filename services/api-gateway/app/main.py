@@ -15,7 +15,6 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
@@ -129,7 +128,15 @@ async def liveness() -> dict:
 @app.get("/health/ready", tags=["Health"])
 async def readiness() -> dict:
     """Kubernetes readiness probe — can we handle requests?"""
-    # Check connectivity to backend services
+    # Guard: http_client is None until the lifespan startup finishes.
+    # If we're hit before that (e.g. a very fast probe), report not-ready
+    # instead of crashing with AttributeError.
+    if http_client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"status": "starting", "reason": "HTTP client not yet initialized"},
+        )
+
     services = {
         "user-service": settings.user_service_url,
         "task-service": settings.task_service_url,
