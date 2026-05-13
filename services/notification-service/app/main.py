@@ -17,6 +17,7 @@ from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 from app.config import settings
 from app.consumer import ServiceBusConsumer
 from app.telemetry import init_telemetry
+from app.routes.stream import router as stream_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -75,6 +76,8 @@ app = FastAPI(
     docs_url="/docs" if settings.environment != "production" else None,
     lifespan=lifespan,
 )
+
+app.include_router(stream_router, prefix="/api/v1/notifications", tags=["notifications"])
 
 
 @app.get("/health")

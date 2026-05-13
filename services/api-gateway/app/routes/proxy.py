@@ -53,6 +53,7 @@ HEADER SECURITY:
 import asyncio
 import logging
 from fastapi import APIRouter, Request, Response, HTTPException
+from fastapi.responses import StreamingResponse
 import httpx
 
 from app.config import settings
@@ -237,6 +238,13 @@ async def proxy(full_path: str, request: Request) -> Response:
     """
     Catch-all proxy: strip unsafe headers → circuit breaker check →
     inject trusted headers → forward with retry → strip hop-by-hop from response.
+
+    SSE HANDLING:
+      When the client sends Accept: text/event-stream we switch to streaming
+      mode. httpx.AsyncClient.stream() keeps the connection open and yields
+      bytes as they arrive — exactly what SSE needs. The buffering path
+      (client.request()) would wait for EOF before returning, causing an
+      infinite hang on a keep-alive stream.
     """
     path = f"/api/v1/{full_path}"
     upstream_url, upstream_path, service_name = _resolve_upstream(path)
@@ -249,6 +257,37 @@ async def proxy(full_path: str, request: Request) -> Response:
     body = await request.body()
     client = await _get_client()
 
+    # ── SSE streaming path ──────────────────────────────────────────────────
+    is_sse = request.headers.get("accept", "").startswith("text/event-stream")
+    if is_sse and request.method.upper() == "GET":
+        breaker = cb_registry.get(service_name)
+        if breaker.is_open():
+            raise HTTPException(status_code=503, detail=f"Service '{service_name}' unavailable")
+
+        async def _sse_generator():
+            """Proxy an SSE stream from upstream, forwarding bytes verbatim."""
+            try:
+                async with client.stream(
+                    "GET", target, headers=forward_headers, timeout=None
+                ) as resp:
+                    breaker.record_success()
+                    async for chunk in resp.aiter_bytes():
+                        yield chunk
+            except Exception as exc:
+                breaker.record_failure()
+                logger.error("SSE stream error from %s: %s", service_name, exc)
+
+        return StreamingResponse(
+            _sse_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    # ── Standard (buffered) proxy path ─────────────────────────────────────
     upstream_response = await _dispatch_with_retry(
         client=client,
         method=request.method,

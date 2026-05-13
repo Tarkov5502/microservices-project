@@ -27,12 +27,23 @@ spec:
       serviceAccountName: {{ .Release.Name }}
       tolerations:
         {{- toYaml .Values.tolerations | nindent 8 }}
+      volumes:
+        - name: kv-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: task-service-secrets
       containers:
         - name: {{ .Release.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.service.targetPort }}
+          volumeMounts:
+            - name: kv-secrets
+              mountPath: /mnt/secrets
+              readOnly: true
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           env:
@@ -43,18 +54,18 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secretName }}
+                  name: task-service-kv-secrets
                   key: db-connection-string
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secretName }}
+                  name: task-service-kv-secrets
                   key: redis-connection-string
             - name: SERVICEBUS_CONNECTION_STRING
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secretName }}
-                  key: sb-sender-connection-string
+                  name: task-service-kv-secrets
+                  key: servicebus-connection-string
           livenessProbe:
             httpGet: { path: {{ .Values.livenessProbe.path }}, port: {{ .Values.livenessProbe.port }} }
             initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}

@@ -40,6 +40,7 @@ from app.dependencies import CallerID
 from app.models import Task, Project, TaskStatus
 from app.schemas import TaskCreate, TaskUpdate, TaskResponse
 from app.config import settings
+from app.pagination import CursorPage, decode_cursor, make_cursor_page
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -192,25 +193,29 @@ async def create_task(
     return TaskResponse.model_validate(task)
 
 
-@router.get("/", response_model=list[TaskResponse])
+@router.get("/", response_model=CursorPage[TaskResponse])
 async def list_tasks(
     caller_id: CallerID,
     db: AsyncSession = Depends(get_db),
     project_id: uuid.UUID | None = Query(None),
     status_filter: TaskStatus | None = Query(None, alias="status"),
-    limit: int = Query(50, ge=1, le=200, description="Max results to return"),
-    offset: int = Query(0, ge=0, description="Number of results to skip (for pagination)"),
-) -> list[TaskResponse]:
+    limit: int = Query(50, ge=1, le=200, description="Max tasks per page"),
+    cursor: str | None = Query(None, description="Opaque cursor from previous page's next_cursor"),
+) -> CursorPage[TaskResponse]:
     """
-    List tasks visible to the caller (creator OR assignee).
+    List tasks visible to the caller (creator OR assignee) with cursor pagination.
 
-    PAGINATION: Use limit + offset to page through results.
-      GET /api/v1/tasks?limit=50&offset=0    ← page 1
-      GET /api/v1/tasks?limit=50&offset=50   ← page 2
+    PAGINATION (cursor-based, not LIMIT/OFFSET):
+      First page:  GET /api/v1/tasks?limit=50
+      Next pages:  GET /api/v1/tasks?limit=50&cursor=<next_cursor from response>
+      Last page:   next_cursor will be null in the response.
+
+    WHY CURSOR INSTEAD OF OFFSET?
+      Offset pagination has correctness issues: if a task is created between
+      page 1 and page 2 fetches, page 2 returns a duplicate. If one is deleted,
+      page 2 skips an item. Cursor pagination is immune to both defects.
 
     SECURITY: Scoped to tasks the caller created or is assigned to.
-    Without the caller filter, any authenticated user could dump every
-    task in the system by omitting project_id.
     """
     stmt = select(Task).where(
         or_(Task.creator_id == caller_id, Task.assignee_id == caller_id)
@@ -219,10 +224,30 @@ async def list_tasks(
         stmt = stmt.where(Task.project_id == project_id)
     if status_filter is not None:
         stmt = stmt.where(Task.status == status_filter)
+    if cursor:
+        try:
+            cursor_dt, cursor_id = decode_cursor(cursor)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Invalid cursor value")
+        # Keyset filter: items strictly before the cursor position in the sort order
+        stmt = stmt.where(
+            or_(
+                Task.created_at < cursor_dt,
+                (Task.created_at == cursor_dt) & (Task.id < cursor_id),
+            )
+        )
 
-    stmt = stmt.order_by(Task.created_at.desc()).limit(limit).offset(offset)
+    # Fetch limit+1 to detect whether a next page exists without a COUNT query
+    stmt = stmt.order_by(Task.created_at.desc(), Task.id.desc()).limit(limit + 1)
     result = await db.execute(stmt)
-    return [TaskResponse.model_validate(t) for t in result.scalars().all()]
+    items = list(result.scalars().all())
+    page_items, next_cursor = make_cursor_page(items, limit)
+    return CursorPage[TaskResponse](
+        items=[TaskResponse.model_validate(t) for t in page_items],
+        next_cursor=next_cursor,
+        count=len(page_items),
+    )
 
 
 @router.get("/{task_id}", response_model=TaskResponse)

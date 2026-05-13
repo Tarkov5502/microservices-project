@@ -37,6 +37,13 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      volumes:
+        - name: kv-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: api-gateway-secrets
       containers:
         - name: {{ .Release.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -44,6 +51,10 @@ spec:
           ports:
             - containerPort: {{ .Values.service.targetPort }}
               name: http
+          volumeMounts:
+            - name: kv-secrets
+              mountPath: /mnt/secrets
+              readOnly: true
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           env:
@@ -54,7 +65,7 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secretName }}
+                  name: api-gateway-kv-secrets
                   key: jwt-secret
           livenessProbe:
             httpGet:

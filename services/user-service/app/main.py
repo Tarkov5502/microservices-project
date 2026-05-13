@@ -17,6 +17,7 @@ from app.database import engine, Base
 from app.routes.auth import router as auth_router
 from app.routes.users import router as users_router
 from app.telemetry import init_telemetry
+from app.redis_client import get_redis, close_redis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -43,9 +44,11 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database ready")
+    await get_redis()  # Establish Redis connection at startup (non-fatal if unavailable)
     init_telemetry(app, service_name="user-service", db_engine=engine)
     yield
     logger.info("User Service shutting down")
+    await close_redis()
     await engine.dispose()
 
 

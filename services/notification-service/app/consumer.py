@@ -15,6 +15,7 @@ from azure.servicebus import ServiceBusReceivedMessage
 from prometheus_client import Counter
 
 from app.notifiers.logger import LogNotifier
+from app.broadcaster import broadcaster
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,11 @@ class ServiceBusConsumer:
             # Complete = acknowledge the message (remove from queue)
             await receiver.complete_message(message)
             self.metrics.labels(event_type=event_type, status="success").inc()
+            # Broadcast to any connected SSE clients AFTER the message is
+            # acknowledged. If broadcast() fails, the message is already
+            # committed — we don't re-deliver it. SSE is best-effort delivery;
+            # Service Bus gives us durable storage, SSE gives us real-time UX.
+            await broadcaster.broadcast(event_type, data)
 
         except Exception as exc:
             logger.error("Failed to process message %s: %s", event_type, exc)

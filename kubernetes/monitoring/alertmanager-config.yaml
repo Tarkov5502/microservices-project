@@ -1,0 +1,133 @@
+# =============================================================================
+# KUBERNETES: Alertmanager Configuration
+# PURPOSE: Route Prometheus alerts to Slack when services are unhealthy.
+#
+# WHAT YOU'LL LEARN:
+#   - Alertmanager routing tree: how alert labels determine where alerts go
+#   - Inhibition rules: suppress lower-severity alerts when a critical one fires
+#   - Grouping: batch related alerts to prevent notification storms
+#   - Silence: temporarily mute alerts during planned maintenance
+#
+# SETUP:
+#   1. Create a Slack incoming webhook:
+#      https://api.slack.com/messaging/webhooks
+#   2. Store the URL in a Kubernetes secret:
+#      kubectl create secret generic alertmanager-slack \
+#        --from-literal=webhook-url=https://hooks.slack.com/services/XXX/YYY/ZZZ \
+#        --namespace monitoring
+#   3. Apply this manifest:
+#      kubectl apply -f kubernetes/monitoring/alertmanager-config.yaml
+#
+# HOW ROUTING WORKS:
+#   Alertmanager uses a routing tree. Every alert starts at the root route
+#   and matches the FIRST child route whose selectors match the alert's labels.
+#   If no child matches, the root route receives it.
+#
+#   Root → [severity=critical] → #incidents (immediate, 0 repeat)
+#        → [severity=warning]  → #alerts    (grouped, 30min repeat)
+#        → (no match)          → #alerts    (default)
+# =============================================================================
+
+# The AlertmanagerConfig CRD is created by kube-prometheus-stack.
+# It configures a specific namespace's alerts rather than the global alertmanager.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: microservices-alerts
+  namespace: microservices
+  labels:
+    # Must match the alertmanager's alertmanagerConfigSelector label
+    alertmanagerConfig: microservices
+spec:
+  route:
+    # How long to wait before sending first notification (collects bursts)
+    groupWait: 30s
+    # How long to wait before sending additional notifications for same group
+    groupInterval: 5m
+    # Minimum time between repeat notifications for the same alert
+    repeatInterval: 4h
+    # Group alerts by these labels so related alerts fire together
+    groupBy: [alertname, severity, namespace]
+
+    # Child routes — checked in order, first match wins
+    routes:
+      - matchers:
+          - name: severity
+            value: critical
+            matchType: "="
+        receiver: slack-critical
+        groupWait: 10s       # Critical alerts fire faster
+        repeatInterval: 1h   # And repeat more often
+        continue: false      # Stop here, don't fall through to next route
+
+      - matchers:
+          - name: severity
+            value: warning
+            matchType: "="
+        receiver: slack-warnings
+        repeatInterval: 4h
+        continue: false
+
+  # If no route matches, use this receiver
+  receivers:
+    - name: slack-critical
+      slackConfigs:
+        - apiURL:
+            name: alertmanager-slack
+            key: webhook-url
+          channel: "#incidents"
+          # SECURITY: sendResolved=true so the channel knows when the fire is out.
+          # Without this, on-call engineers have to manually check if things recovered.
+          sendResolved: true
+          title: '🚨 CRITICAL: {{ .CommonLabels.alertname }}'
+          text: |
+            *Alert:* {{ .CommonLabels.alertname }}
+            *Severity:* {{ .CommonLabels.severity }}
+            *Namespace:* {{ .CommonLabels.namespace }}
+            {{ range .Alerts }}
+            *Summary:* {{ .Annotations.summary }}
+            *Description:* {{ .Annotations.description }}
+            *Started:* {{ .StartsAt | since }}
+            {{ end }}
+
+    - name: slack-warnings
+      slackConfigs:
+        - apiURL:
+            name: alertmanager-slack
+            key: webhook-url
+          channel: "#alerts"
+          sendResolved: true
+          title: '⚠️ WARNING: {{ .CommonLabels.alertname }}'
+          text: |
+            *Alert:* {{ .CommonLabels.alertname }}
+            *Severity:* {{ .CommonLabels.severity }}
+            {{ range .Alerts }}
+            *Summary:* {{ .Annotations.summary }}
+            *Description:* {{ .Annotations.description }}
+            {{ end }}
+
+  # INHIBITION RULES:
+  # When a DeploymentUnavailable fires (service is completely down), suppress
+  # HighErrorRate and HighLatency for that same service. The deployment being
+  # down already explains the errors — duplicate alerts create noise.
+  inhibitRules:
+    - sourceMatchers:
+        - name: alertname
+          value: DeploymentUnavailable
+          matchType: "="
+      targetMatchers:
+        - name: alertname
+          value: HighErrorRate
+          matchType: "="
+      # Only inhibit if the deployment and error rate are in the same namespace
+      equal: [namespace]
+
+    - sourceMatchers:
+        - name: alertname
+          value: DeploymentUnavailable
+          matchType: "="
+      targetMatchers:
+        - name: alertname
+          value: HighLatency
+          matchType: "="
+      equal: [namespace]

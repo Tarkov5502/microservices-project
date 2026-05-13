@@ -98,6 +98,19 @@ module "keyvault" {
   depends_on              = [module.aks]
 }
 
+module "workload_identity" {
+  source              = "../../modules/workload-identity"
+  project_name        = var.project_name
+  environment         = var.environment
+  location            = var.location
+  resource_group_name = azurerm_resource_group.main.name
+  oidc_issuer_url     = module.aks.oidc_issuer_url
+  key_vault_id        = module.keyvault.key_vault_id
+  tags                = local.common_tags
+
+  depends_on = [module.aks, module.keyvault]
+}
+
 module "aks" {
   source                     = "../../modules/aks"
   project_name               = var.project_name

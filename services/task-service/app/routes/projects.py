@@ -9,6 +9,7 @@ from app.database import get_db
 from app.dependencies import CallerID
 from app.models import Project
 from app.schemas import ProjectCreate, ProjectResponse
+from app.pagination import CursorPage, decode_cursor, make_cursor_page
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -35,22 +36,40 @@ async def create_project(
     return ProjectResponse.model_validate(project)
 
 
-@router.get("/", response_model=list[ProjectResponse])
+@router.get("/", response_model=CursorPage[ProjectResponse])
 async def list_projects(
     caller_id: CallerID,
     db: AsyncSession = Depends(get_db),
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-) -> list[ProjectResponse]:
-    result = await db.execute(
+    cursor: str | None = Query(None, description="Opaque cursor from previous page's next_cursor"),
+) -> CursorPage[ProjectResponse]:
+    stmt = (
         select(Project)
         .where(Project.owner_id == caller_id)
         .where(Project.is_active == True)
-        .order_by(Project.created_at.desc())
-        .limit(limit)
-        .offset(offset)
     )
-    return [ProjectResponse.model_validate(p) for p in result.scalars().all()]
+    if cursor:
+        try:
+            cursor_dt, cursor_id = decode_cursor(cursor)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Invalid cursor value")
+        from sqlalchemy import or_
+        stmt = stmt.where(
+            or_(
+                Project.created_at < cursor_dt,
+                (Project.created_at == cursor_dt) & (Project.id < cursor_id),
+            )
+        )
+    stmt = stmt.order_by(Project.created_at.desc(), Project.id.desc()).limit(limit + 1)
+    result = await db.execute(stmt)
+    items = list(result.scalars().all())
+    page_items, next_cursor = make_cursor_page(items, limit)
+    return CursorPage[ProjectResponse](
+        items=[ProjectResponse.model_validate(p) for p in page_items],
+        next_cursor=next_cursor,
+        count=len(page_items),
+    )
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

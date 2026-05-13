@@ -82,3 +82,15 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int   # seconds until expiry
     user: UserResponse
+    # Opaque refresh token. Store securely (httpOnly cookie or secure storage).
+    # Use with POST /api/v1/auth/refresh to get a new access token.
+    # Single-use: each refresh rotates this value. Missing if Redis is unavailable.
+    refresh_token: str | None = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str

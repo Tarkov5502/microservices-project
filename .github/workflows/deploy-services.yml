@@ -21,8 +21,9 @@ on:
       - "kubernetes/**"
 
 permissions:
-  id-token: write
+  id-token: write   # Required for OIDC Azure login AND Cosign keyless signing
   contents: read
+  packages: write   # Required for Cosign to push signatures to the OCI registry
 
 env:
   AKS_CLUSTER_NAME: aks-microservices-dev
@@ -90,17 +91,44 @@ jobs:
         run: az acr login --name ${{ secrets.ACR_NAME }}
 
       - name: Build and push Docker image
+        id: build-push
         uses: docker/build-push-action@v5
         with:
           context: services/${{ matrix.service }}
           push: true
-          # Tag with both the git SHA (immutable) and 'latest' (mutable)
-          # Always use the SHA tag in production — 'latest' is ambiguous!
           tags: |
             ${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.service }}:${{ github.sha }}
             ${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.service }}:latest
           cache-from: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.service }}:latest
           cache-to: type=inline
+
+      # ── Cosign keyless image signing ─────────────────────────────────────
+      # Signs the image digest (not the tag!) using GitHub's OIDC token.
+      # No long-lived signing key is needed — Fulcio issues a short-lived cert
+      # tied to this exact GitHub Actions run, recorded in Rekor permanently.
+      #
+      # WHY SIGN THE DIGEST NOT THE TAG?
+      #   Tags are mutable. Someone can push new code to ':latest' after signing.
+      #   The digest (sha256:...) is content-addressed — immutable by definition.
+      #   Kyverno verifies the digest, so mutateDigest pins the running pod to
+      #   exactly the signed artifact.
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.5.0
+        with:
+          cosign-release: v2.2.4
+
+      - name: Sign image with Cosign (keyless)
+        env:
+          # COSIGN_EXPERIMENTAL is implicit in cosign v2; kept for clarity
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          IMAGE_DIGEST="${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.service }}@${{ steps.build-push.outputs.digest }}"
+          echo "Signing: $IMAGE_DIGEST"
+          cosign sign --yes "$IMAGE_DIGEST"
+          echo "✅ Image signed. Verify with:"
+          echo "   cosign verify $IMAGE_DIGEST \\"
+          echo "     --certificate-identity-regexp 'https://github.com/${{ github.repository }}' \\"
+          echo "     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'"
 
   # ─── Deploy to AKS ────────────────────────────────────────────────────────
   deploy:
@@ -131,11 +159,13 @@ jobs:
           version: "3.14.4"
 
       # Apply base K8s resources (idempotent)
-      - name: Apply namespaces + RBAC
+      - name: Apply namespaces + RBAC + secrets
         run: |
           kubectl apply -f kubernetes/namespaces/
           kubectl apply -f kubernetes/rbac/
           kubectl apply -f kubernetes/network-policies/
+          kubectl apply -f kubernetes/secrets/
+          kubectl apply -f kubernetes/security/kyverno-policies.yaml || true  # Non-fatal if Kyverno not installed
 
       # Deploy each service that was built (using the exact SHA for reproducibility)
       - name: Deploy api-gateway

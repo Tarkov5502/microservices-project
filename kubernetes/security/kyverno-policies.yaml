@@ -1,0 +1,133 @@
+# =============================================================================
+# KUBERNETES: Kyverno ClusterPolicies for image signing enforcement
+#
+# PURPOSE:
+#   Enforce that every container image running in the 'microservices' namespace
+#   was built by our trusted CI pipeline (proven by a Cosign signature).
+#
+# WHAT YOU'LL LEARN:
+#   - Supply chain security: the gap between "we scanned it" and "we know it's ours"
+#   - Kyverno: a Kubernetes-native policy engine (alternative to OPA/Gatekeeper)
+#   - Cosign keyless signing: using GitHub's OIDC token instead of a long-lived key
+#   - Admission webhooks: how Kubernetes intercepts and validates pod creation
+#
+# HOW COSIGN KEYLESS SIGNING WORKS:
+#   1. CI generates a short-lived OIDC token from GitHub's OIDC provider.
+#   2. Cosign exchanges the token with Fulcio (a free CA) for an X.509 cert
+#      tied to the workflow identity (e.g. github.com/<owner>/<repo>).
+#   3. Cosign signs the image digest and uploads the signature + cert to Rekor
+#      (a public transparency log — like Certificate Transparency for images).
+#   4. The cert expires in 10 minutes but the Rekor entry is permanent.
+#
+#   VERIFICATION: Kyverno verifies the signature by:
+#     a. Fetching the image digest from the registry
+#     b. Looking up the signature in Rekor or OCI registry
+#     c. Verifying the cert was issued by Fulcio AND the subject matches
+#        the expected GitHub Actions workflow (identity field)
+#
+# SETUP:
+#   1. Install Kyverno:
+#      helm repo add kyverno https://kyverno.github.io/kyverno/
+#      helm upgrade --install kyverno kyverno/kyverno \
+#        --namespace kyverno --create-namespace
+#
+#   2. Apply these policies:
+#      kubectl apply -f kubernetes/security/kyverno-policies.yaml
+#
+#   3. Sign images in CI (see .github/workflows/deploy.yml):
+#      cosign sign --yes $IMAGE_DIGEST
+#
+# AUDIT VS ENFORCE:
+#   validationFailureAction: Audit  → Log violations, don't block (good for rollout)
+#   validationFailureAction: Enforce → Block non-signed images from starting
+#   Start with Audit, verify everything is signed, then switch to Enforce.
+# =============================================================================
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signatures
+  annotations:
+    # Document the policy intent for future operators
+    policies.kyverno.io/title: Verify Container Image Signatures
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      All container images deployed to the 'microservices' namespace must be
+      signed by the project's GitHub Actions CI pipeline using Cosign keyless
+      signing. Images without a valid signature from the trusted workflow are
+      rejected at admission time.
+spec:
+  # Audit: log but don't block (safe for initial rollout)
+  # Change to Enforce once you've confirmed all images are being signed
+  validationFailureAction: Audit
+
+  background: true  # Also check existing resources, not just new ones
+
+  rules:
+    - name: check-image-signature
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [microservices]
+
+      verifyImages:
+        - imageReferences:
+            # Match all images from our ACR — replace with your ACR login server
+            - "REPLACE_ACR_LOGIN_SERVER/*"
+
+          # Keyless verification via Sigstore/Fulcio
+          attestors:
+            - count: 1  # At least 1 attestor must verify successfully
+              entries:
+                - keyless:
+                    # The subject must match the exact GitHub Actions workflow
+                    # that built and signed the image. An attacker who signs
+                    # with a different workflow (even in the same repo) is rejected.
+                    subject: "https://github.com/REPLACE_GITHUB_ORG/REPLACE_GITHUB_REPO/.github/workflows/deploy.yml@refs/heads/main"
+                    # Fulcio's OIDC issuer — the CA that issued the signing cert
+                    issuer: "https://token.actions.githubusercontent.com"
+                    # Rekor public instance — the transparency log
+                    rekor:
+                      url: https://rekor.sigstore.dev
+
+          # Mutate: replace :latest tags with the verified digest.
+          # This makes the running image immutable — no one can push a new
+          # 'latest' over the top of what was signed.
+          mutateDigest: true
+          verifyDigest: true
+          required: true
+
+---
+# POLICY: Require resource limits on all pods in microservices namespace.
+# A container without limits can consume all node resources and starve other pods.
+# This policy ensures every container has explicitly set CPU and memory limits.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-container-resources
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [microservices]
+      validate:
+        message: "All containers must have CPU and memory limits set."
+        pattern:
+          spec:
+            containers:
+              - name: "*"
+                resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"

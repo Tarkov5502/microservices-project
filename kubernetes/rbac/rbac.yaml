@@ -19,13 +19,12 @@ metadata:
   name: api-gateway
   namespace: microservices
   annotations:
-    azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
-# SECURITY: Disable automatic service account token mounting.
-# These services authenticate to Azure via Workload Identity (federated OIDC),
-# not via the Kubernetes API. The automounted token is:
-#   1. Readable by any process running in the pod
-#   2. Grants the RoleBinding permissions to any compromised container
-# If a service genuinely needs K8s API access, mount the token explicitly.
+    # Workload Identity: replace with output from:
+    #   terraform -chdir=terraform/environments/dev output -json | \
+    #     jq -r '.workload_identity_client_ids.value["api-gateway"]'
+    azure.workload.identity/client-id: "REPLACE_WITH_API_GATEWAY_CLIENT_ID"
+labels:
+  azure.workload.identity/use: "true"   # Triggers the Workload Identity webhook
 automountServiceAccountToken: false
 
 ---
@@ -35,7 +34,9 @@ metadata:
   name: user-service
   namespace: microservices
   annotations:
-    azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+    azure.workload.identity/client-id: "REPLACE_WITH_USER_SERVICE_CLIENT_ID"
+labels:
+  azure.workload.identity/use: "true"
 automountServiceAccountToken: false
 
 ---
@@ -45,7 +46,9 @@ metadata:
   name: task-service
   namespace: microservices
   annotations:
-    azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+    azure.workload.identity/client-id: "REPLACE_WITH_TASK_SERVICE_CLIENT_ID"
+labels:
+  azure.workload.identity/use: "true"
 automountServiceAccountToken: false
 
 ---
@@ -55,7 +58,9 @@ metadata:
   name: notification-service
   namespace: microservices
   annotations:
-    azure.workload.identity/client-id: "REPLACE_WITH_AKS_CLIENT_ID"
+    azure.workload.identity/client-id: "REPLACE_WITH_NOTIFICATION_SERVICE_CLIENT_ID"
+labels:
+  azure.workload.identity/use: "true"
 automountServiceAccountToken: false
 
 ---

@@ -113,6 +113,20 @@ resource "azurerm_kubernetes_cluster" "main" {
     secret_rotation_enabled = true
   }
 
+  # ─── OIDC Issuer ──────────────────────────────────────────────────────────
+  # Expose an OIDC issuer endpoint so Azure AD can validate tokens that pods
+  # present during the Workload Identity token exchange flow.
+  # Without this, federated credentials cannot be created or used.
+  oidc_issuer_enabled = true
+
+  # ─── Workload Identity ────────────────────────────────────────────────────
+  # Installs the mutating webhook that intercepts pod creation. For any pod
+  # with the azure.workload.identity/use: "true" label, the webhook:
+  #   1. Injects AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_FEDERATED_TOKEN_FILE
+  #   2. Mounts a projected volume at AZURE_FEDERATED_TOKEN_FILE path
+  # Azure SDKs' DefaultAzureCredential detects these vars automatically.
+  workload_identity_enabled = true
+
   tags = var.tags
 
   lifecycle {
