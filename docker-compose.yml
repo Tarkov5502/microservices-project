@@ -154,6 +154,10 @@ services:
       ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173"
       RATE_LIMIT_REQUESTS: "200"
       AUTH_RATE_LIMIT_REQUESTS: "20"
+      # Redis is used to share rate limit state across all gateway replicas.
+      # Without this, each replica has an independent bucket and the effective
+      # limit is N × RATE_LIMIT_REQUESTS where N = number of running pods.
+      REDIS_URL: "redis://redis:6379"
     ports:
       - "8000:8000"
     depends_on:

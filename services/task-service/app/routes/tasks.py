@@ -6,29 +6,38 @@ Key design decisions:
      or assignee. Without this, any authenticated user can read/modify/delete any
      other user's tasks — a textbook Broken Object-Level Authorization flaw.
 
-  2. EVENT-AFTER-COMMIT: Events published via FastAPI BackgroundTasks run AFTER
+  2. PROJECT MEMBERSHIP: create_task now verifies the target project exists AND
+     the caller is its owner before allowing task creation. Without this check,
+     a user who knows (or guesses) a project UUID could create tasks inside
+     another user's project.
+
+  3. EVENT-AFTER-COMMIT: Events published via FastAPI BackgroundTasks run AFTER
      the response is sent, which is after get_db()'s finally block has committed.
      Events never fire before the DB transaction is durable.
 
-  3. SB CLIENT POOLING: A module-level lazy singleton sender with double-checked
+  4. SB CLIENT POOLING: A module-level lazy singleton sender with double-checked
      locking avoids creating a new AMQP connection per event.
 
-  4. PATCH SEMANTICS: Uses exclude_unset=True (not exclude_none) so clients can
+  5. PATCH SEMANTICS: Uses exclude_unset=True (not exclude_none) so clients can
      explicitly null-out nullable fields like assignee_id and description.
+
+  6. PAGINATION: list_tasks accepts limit (max 200) and offset so callers can
+     page through all tasks rather than being silently capped at 100.
 """
 import json
 import uuid
 import logging
 import asyncio
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Header, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Query
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from azure.servicebus.aio import ServiceBusClient, ServiceBusSender
 from azure.servicebus import ServiceBusMessage
 
 from app.database import get_db
-from app.models import Task, TaskStatus
+from app.dependencies import CallerID
+from app.models import Task, Project, TaskStatus
 from app.schemas import TaskCreate, TaskUpdate, TaskResponse
 from app.config import settings
 
@@ -37,17 +46,6 @@ router = APIRouter()
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
-
-def _parse_user_id(raw: str) -> uuid.UUID:
-    """Parse X-User-Id header; returns 400 on malformed input instead of 500."""
-    try:
-        return uuid.UUID(raw)
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid X-User-Id header — expected a UUID",
-        )
-
 
 async def _get_task_or_404(task_id: uuid.UUID, db: AsyncSession) -> Task:
     result = await db.execute(select(Task).where(Task.id == task_id))
@@ -69,8 +67,6 @@ async def _get_authorized_task(
 
     - Visibility:  caller is the creator OR assignee.
     - Mutation:    require_owner=True additionally asserts caller is the creator.
-      Returns 403 (not 404) when the task exists but the caller isn't the owner,
-      so they know the operation is forbidden (they already know it exists via GET).
     """
     task = await _get_task_or_404(task_id, db)
 
@@ -84,6 +80,26 @@ async def _get_authorized_task(
             detail="Only the task creator can perform this action",
         )
     return task
+
+
+async def _get_owned_project(
+    project_id: uuid.UUID, caller_id: uuid.UUID, db: AsyncSession
+) -> Project:
+    """
+    Verify the project exists and belongs to the caller.
+
+    FIX: Without this check, any user who knows (or guesses) a project UUID
+    can create tasks inside it — a Broken Object Level Authorization flaw
+    at the resource-creation level, not just the read/update level.
+    """
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if project.owner_id != caller_id:
+        # Return 404 not 403 — don't confirm the project exists to the caller.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    return project
 
 
 # ─── Singleton Service Bus Sender ─────────────────────────────────────────────
@@ -148,12 +164,14 @@ async def _publish_event(event_type: str, data: dict) -> None:
 async def create_task(
     payload: TaskCreate,
     background: BackgroundTasks,
-    x_user_id: str = Header(..., alias="X-User-Id"),
+    caller_id: CallerID,
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
-    caller_id = _parse_user_id(x_user_id)
-    # status is hard-coded to TODO here — it is NOT in TaskCreate anymore.
-    # Clients cannot create tasks in any other state.
+    # FIX: Verify the project exists and the caller owns it before allowing
+    # task creation inside it. Without this, any user can create tasks in
+    # any project by knowing or guessing the project UUID.
+    await _get_owned_project(payload.project_id, caller_id, db)
+
     task = Task(
         **payload.model_dump(),
         creator_id=caller_id,
@@ -176,19 +194,24 @@ async def create_task(
 
 @router.get("/", response_model=list[TaskResponse])
 async def list_tasks(
+    caller_id: CallerID,
+    db: AsyncSession = Depends(get_db),
     project_id: uuid.UUID | None = Query(None),
     status_filter: TaskStatus | None = Query(None, alias="status"),
-    x_user_id: str = Header(..., alias="X-User-Id"),
-    db: AsyncSession = Depends(get_db),
+    limit: int = Query(50, ge=1, le=200, description="Max results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip (for pagination)"),
 ) -> list[TaskResponse]:
     """
     List tasks visible to the caller (creator OR assignee).
 
-    SECURITY: Without the caller filter, any authenticated user could dump all
-    tasks across all projects by omitting the project_id parameter. The query
-    is scoped to tasks the caller is directly involved with.
+    PAGINATION: Use limit + offset to page through results.
+      GET /api/v1/tasks?limit=50&offset=0    ← page 1
+      GET /api/v1/tasks?limit=50&offset=50   ← page 2
+
+    SECURITY: Scoped to tasks the caller created or is assigned to.
+    Without the caller filter, any authenticated user could dump every
+    task in the system by omitting project_id.
     """
-    caller_id = _parse_user_id(x_user_id)
     stmt = select(Task).where(
         or_(Task.creator_id == caller_id, Task.assignee_id == caller_id)
     )
@@ -196,18 +219,19 @@ async def list_tasks(
         stmt = stmt.where(Task.project_id == project_id)
     if status_filter is not None:
         stmt = stmt.where(Task.status == status_filter)
-    result = await db.execute(stmt.order_by(Task.created_at.desc()).limit(100))
+
+    stmt = stmt.order_by(Task.created_at.desc()).limit(limit).offset(offset)
+    result = await db.execute(stmt)
     return [TaskResponse.model_validate(t) for t in result.scalars().all()]
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(
     task_id: uuid.UUID,
-    x_user_id: str = Header(..., alias="X-User-Id"),
+    caller_id: CallerID,
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
     """Fetch a task. Only the creator or current assignee can view it."""
-    caller_id = _parse_user_id(x_user_id)
     task = await _get_authorized_task(task_id, caller_id, db)
     return TaskResponse.model_validate(task)
 
@@ -217,17 +241,13 @@ async def update_task(
     task_id: uuid.UUID,
     payload: TaskUpdate,
     background: BackgroundTasks,
-    x_user_id: str = Header(..., alias="X-User-Id"),
+    caller_id: CallerID,
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
     """Update a task. Only the creator may modify it."""
-    caller_id = _parse_user_id(x_user_id)
     task = await _get_authorized_task(task_id, caller_id, db, require_owner=True)
     old_status = task.status
 
-    # exclude_unset=True: only update fields the client explicitly sent.
-    # This allows clients to null-out assignee_id or description by sending null,
-    # while still ignoring fields that were simply omitted from the request body.
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(task, field, value)
     await db.flush()
@@ -247,11 +267,10 @@ async def update_task(
 async def delete_task(
     task_id: uuid.UUID,
     background: BackgroundTasks,
-    x_user_id: str = Header(..., alias="X-User-Id"),
+    caller_id: CallerID,
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a task. Only the creator may delete it."""
-    caller_id = _parse_user_id(x_user_id)
     task = await _get_authorized_task(task_id, caller_id, db, require_owner=True)
     task_id_str = str(task.id)
     await db.delete(task)

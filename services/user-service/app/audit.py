@@ -85,7 +85,7 @@ def log_account_deactivated(user_id: str, target_user_id: str) -> None:
 
 
 def log_password_changed(user_id: str, ip: str | None = None) -> None:
-    """Log a password change evewithout logging the new password!)."""
+    """Log a password change event (without logging the new password!)."""
     _emit("password_changed", {
         "user_id": user_id,
         "client_ip": ip,

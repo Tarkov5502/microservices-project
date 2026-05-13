@@ -40,6 +40,9 @@ env:
   USER_SERVICE_URL: "http://user-service:8001"
   TASK_SERVICE_URL: "http://task-service:8002"
   NOTIFICATION_SERVICE_URL: "http://notification-service:8003"
+  # Redis URL is wired in at deploy time via the Azure Cache for Redis connection string.
+  # Set via: helm upgrade --install api-gateway ./helm/api-gateway --set env.REDIS_URL=$REDIS_URL
+  REDIS_URL: ""
 
 secretName: app-secrets
 

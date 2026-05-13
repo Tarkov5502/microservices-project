@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     # 10 attempts/min = still comfortable for real users, painful for bots.
     auth_rate_limit_requests: int = 10
 
+    # ── Redis ─────────────────────────────────────────────────────────────────
+    # Used by the rate limiter to share state across multiple gateway replicas.
+    # Without Redis, each replica has an independent in-memory bucket, so with
+    # N replicas a client can make N × rate_limit_requests requests per window.
+    # When unset, the rate limiter falls back to in-memory (single-replica safe).
+    redis_url: str = "redis://localhost:6379"
+
     class Config:
         env_file = ".env"
         case_sensitive = False

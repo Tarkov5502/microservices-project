@@ -117,6 +117,7 @@ app.add_middleware(
     max_requests=settings.rate_limit_requests,
     window_seconds=settings.rate_limit_window_seconds,
     auth_max_requests=settings.auth_rate_limit_requests,
+    redis_url=settings.redis_url,
 )
 app.add_middleware(
     JWTAuthMiddleware,
@@ -162,9 +163,6 @@ async def liveness() -> dict:
 @app.get("/health/ready", tags=["Health"])
 async def readiness() -> dict:
     """Kubernetes readiness probe — can we handle requests?"""
-    # Guard: http_client is None until the lifespan startup finishes.
-    # If we're hit before that (e.g. a very fast probe), report not-ready
-    # instead of crashing with AttributeError.
     if http_client is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -172,17 +170,24 @@ async def readiness() -> dict:
         )
 
     services = {
-        "user-service": settings.user_service_url,
-        "task-service": settings.task_service_url,
+        "user-service":         settings.user_service_url,
+        "task-service":         settings.task_service_url,
+        "notification-service": settings.notification_service_url,
     }
-    unhealthy = []
-    for name, url in services.items():
+
+    async def _check(name: str, url: str) -> str | None:
+        """Return service name if unhealthy, None if healthy."""
         try:
             resp = await http_client.get(f"{url}/health", timeout=5.0)
-            if resp.status_code != 200:
-                unhealthy.append(name)
+            return name if resp.status_code != 200 else None
         except Exception:
-            unhealthy.append(name)
+            return name
+
+    # FIX: check all services concurrently, not sequentially.
+    # Sequential: total time = sum(each probe timeout).
+    # Concurrent: total time = max(any probe timeout).
+    results = await asyncio.gather(*[_check(n, u) for n, u in services.items()])
+    unhealthy = [r for r in results if r is not None]
 
     if unhealthy:
         raise HTTPException(
