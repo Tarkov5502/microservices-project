@@ -1,105 +1,172 @@
 """
-notification-service/app/broadcaster.py — In-memory SSE event broadcaster.
+notification-service/app/broadcaster.py — User-scoped in-memory SSE broadcaster.
 
-PURPOSE:
-  Bridge the Service Bus consumer (which runs in a background asyncio task)
-  to SSE connections (which are long-lived HTTP responses). When the consumer
-  processes a message it calls broadcast(); every connected SSE client
-  immediately receives the event without polling.
+WHY THIS WAS REWRITTEN:
+  The original implementation had a single flat pool of queues shared across
+  all connected clients. Every event was sent to every client regardless of
+  who it was intended for. That broke two things:
 
-ARCHITECTURE:
-                  ┌─────────────────┐
-  Service Bus ──► │ ServiceBusConsumer│──► broadcaster.broadcast()
-                  └─────────────────┘           │
-                                                ▼
-  HTTP Client ◄── SSE stream ◄── Queue ◄── Broadcaster._queues
-                                (one per connected client)
+    1. Privacy — User A received task notifications intended for User B.
+    2. Correctness — The entire point of targeted notifications is that the
+       right person hears about the right event. All-or-nothing broadcast
+       is just spam.
 
-WHY IN-MEMORY QUEUES (not Redis Pub/Sub)?
-  For a learning project running 1–2 replicas, asyncio queues are simpler and
-  sufficient. In production with many replicas, each pod only broadcasts to
-  clients connected to THAT pod. Redis Pub/Sub or a message bus would be used
-  to fan-out across all pods. This is deliberately called out as a known
-  limitation in the code below.
+NEW ARCHITECTURE:
+  Queues are now organised by user_id, not a global client counter.
+
+    _queues: dict[user_id: str, dict[conn_id: int, Queue]]
+
+  A single user can have multiple open connections (e.g., two browser tabs).
+  Each connection gets its own queue, but they share the same user_id bucket.
+
+  broadcast(event_type, data, target_user_ids=[...]) pushes the event only
+  into the queues belonging to the listed user IDs. This means the consumer
+  must know WHO should receive each event — which it does, because event
+  payloads carry creator_id, assignee_id, etc.
+
+INTERFACE CONTRACT (unchanged for callers):
+  broadcaster.broadcast(event_type, data, target_user_ids=[...])
+  broadcaster.subscribe(user_id)   → async generator of SSE-formatted strings
 
 KNOWN LIMITATION — Multi-pod fan-out:
-  If notification-service runs N replicas, a consumer on pod A broadcasts to
-  clients on pod A only. Clients on pods B through N miss the event. For a
-  stateless fan-out, replace _queues with a Redis Pub/Sub channel and have
-  each pod subscribe. The interface here is designed so that swap-out is
-  isolated to broadcast() and subscribe() only — callers are unaffected.
+  Same as before: this works for single-replica or well-pinned clients.
+  For multi-replica fan-out replace _queues with Redis Pub/Sub channels;
+  broadcast() publishes to a channel, subscribe() listens on it.
+  The interface here is designed so that swap-out is isolated to this
+  module only — callers (consumer.py, stream.py) are unaffected.
 """
 import asyncio
 import json
 import logging
+from collections import defaultdict
 from collections.abc import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
+# Maximum events buffered per connection before we start dropping.
+# Prevents a slow client from consuming unbounded memory.
+_QUEUE_MAXSIZE = 100
+
 
 class _Broadcaster:
     """
-    Fan-out in-memory event bus.
+    Fan-out in-memory event bus, scoped per user.
 
     Thread safety: asyncio.Queue is designed for single-threaded async use.
-    All operations must be called from within the same event loop.
+    All operations MUST run in the same event loop.
     """
 
     def __init__(self) -> None:
-        self._queues: dict[int, asyncio.Queue[str]] = {}
-        self._next_id = 0
+        # user_id → {conn_id → Queue[str]}
+        # defaultdict so we never need to check "does this user exist?"
+        self._queues: dict[str, dict[int, asyncio.Queue]] = defaultdict(dict)
+        self._next_conn_id = 0
 
-    def _new_id(self) -> int:
-        self._next_id += 1
-        return self._next_id
+    def _new_conn_id(self) -> int:
+        self._next_conn_id += 1
+        return self._next_conn_id
 
-    async def broadcast(self, event_type: str, data: dict) -> None:
+    # ─── Broadcast ────────────────────────────────────────────────────────────
+
+    async def broadcast(
+        self,
+        event_type: str,
+        data: dict,
+        target_user_ids: list[str],
+    ) -> None:
         """
-        Push an event to all connected SSE clients.
-        Called by the Service Bus consumer after each successful message.
-        Never raises — a broadcast failure must never crash the consumer.
+        Push an event to every open connection belonging to each user in
+        target_user_ids.
+
+        Rules:
+          - If target_user_ids is empty, the event is silently discarded.
+            This is intentional: an event with no targets is a no-op, not
+            a reason to spam every connected client.
+          - Never raises. A broadcast failure must never crash the consumer.
+          - Stale connections (queues that are full) are dropped for that
+            specific event; they remain registered until subscribe() exits.
+
+        Args:
+            event_type:      The event name, e.g. "task.created".
+            data:            The event payload dict. Must be JSON-serialisable.
+            target_user_ids: Explicit list of user IDs who should receive this
+                             event. Caller is responsible for deciding who
+                             the recipients are (assignee, creator, etc.).
         """
-        if not self._queues:
+        if not target_user_ids:
+            logger.debug("broadcast: no target_user_ids for '%s' — discarding", event_type)
             return
+
         payload = json.dumps({"event_type": event_type, "data": data})
-        disconnected: list[int] = []
-        for client_id, queue in self._queues.items():
-            try:
-                # put_nowait: non-blocking. If a client's queue is full (maxsize
-                # reached), drop tfor that client rather than blocking
-                # ALL other clients waiting on a slow consumer.
-                queue.put_nowait(payload)
-            except asyncio.QueueFull:
-                logger.warning("SSE client %d queue full — dropping event %s", client_id, event_type)
-            except Exception as exc:
-                logger.error("SSE broadcast to client %d failed: %s", client_id, exc)
-                disconnected.append(client_id)
-        for cid in disconnected:
-            self._queues.pop(cid, None)
-        if self._queues:
-            logger.debug("Broadcast '%s' to %d SSE client(s)", event_type, len(self._queues))
+        total_delivered = 0
+        total_dropped = 0
 
-    async def subscribe(self) -> AsyncGenerator[str, None]:
-        """
-        Async generator: yields SSE-formatted event strings until the client
-        disconnects. Automatically cleans up on exit (cancellation or exception).
+        for user_id in target_user_ids:
+            user_conns = self._queues.get(user_id)
+            if not user_conns:
+                # User not currently connected — that's fine, they'll poll
+                # on reconnect or miss the event entirely (SSE is best-effort).
+                logger.debug("broadcast: user %s has no active SSE connections", user_id)
+                continue
 
-        Usage:
-            async for raw_line in broadcaster.subscribe():
-                yield raw_line
+            dead_conn_ids: list[int] = []
+
+            for conn_id, queue in user_conns.items():
+                try:
+                    queue.put_nowait(payload)
+                    total_delivered += 1
+                except asyncio.QueueFull:
+                    logger.warning(
+                        "SSE conn %d (user %s) queue full — dropping '%s'",
+                        conn_id, user_id, event_type,
+                    )
+                    total_dropped += 1
+                except Exception as exc:
+                    logger.error(
+                        "SSE broadcast to conn %d (user %s) failed: %s",
+                        conn_id, user_id, exc,
+                    )
+                    dead_conn_ids.append(conn_id)
+
+            for cid in dead_conn_ids:
+                user_conns.pop(cid, None)
+
+        logger.debug(
+            "Broadcast '%s' → %d delivered, %d dropped",
+            event_type, total_delivered, total_dropped,
+        )
+
+    # ─── Subscribe ────────────────────────────────────────────────────────────
+
+    async def subscribe(self, user_id: str) -> AsyncGenerator[str, None]:
         """
-        client_id = self._new_id()
-        # maxsize=100: at 100 queued events, new events are dropped for this
-        # client. This prevents slow clients from consuming unbounded memory.
-        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=100)
-        self._queues[client_id] = queue
-        logger.info("SSE client %d connected (total: %d)", client_id, len(self._queues))
+        Async generator that yields SSE-formatted strings for a specific user.
+
+        Each call creates one connection slot under that user's bucket.
+        A single user may hold multiple concurrent connections (e.g., two
+        browser tabs) — each gets an independent queue.
+
+        Yields:
+            "data: <json>\\n\\n"  for real events
+            ": keepalive\\n\\n"   every 30 s to prevent proxy timeout
+        """
+        conn_id = self._new_conn_id()
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
+
+        # Register under the user's bucket
+        self._queues[user_id][conn_id] = queue
+        total_conns = sum(len(v) for v in self._queues.values())
+        logger.info(
+            "SSE conn %d opened for user %s (total connections: %d)",
+            conn_id, user_id, total_conns,
+        )
+
         try:
             while True:
-                # 30s timeout: send a keepalive comment so the connection
-                # isn't silently killed by intermediary proxies that close
-                # idle connections. SSE comments start with ':'.
                 try:
+                    # 30 s timeout: emit keepalive comment to prevent proxy
+                    # servers (nginx, Azure Application Gateway) from silently
+                    # closing idle persistent connections.
                     payload = await asyncio.wait_for(queue.get(), timeout=30.0)
                     yield f"data: {payload}\n\n"
                 except asyncio.TimeoutError:
@@ -107,8 +174,27 @@ class _Broadcaster:
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:
-            self._queues.pop(client_id, None)
-            logger.info("SSE client %d disconnected (total: %d)", client_id, len(self._queues))
+            # Clean up this connection slot
+            user_conns = self._queues.get(user_id, {})
+            user_conns.pop(conn_id, None)
+            # Remove the user's bucket entirely if no connections remain
+            if not user_conns:
+                self._queues.pop(user_id, None)
+            remaining = sum(len(v) for v in self._queues.values())
+            logger.info(
+                "SSE conn %d closed for user %s (total connections: %d)",
+                conn_id, user_id, remaining,
+            )
+
+    # ─── Introspection (used by tests + health endpoint) ─────────────────────
+
+    def active_user_count(self) -> int:
+        """Number of distinct users with at least one open SSE connection."""
+        return len(self._queues)
+
+    def active_connection_count(self) -> int:
+        """Total number of open SSE connections across all users."""
+        return sum(len(v) for v in self._queues.values())
 
 
 # Module-level singleton — shared by consumer and SSE route.

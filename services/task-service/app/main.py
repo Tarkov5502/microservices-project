@@ -10,6 +10,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
 from app.database import engine, Base
+from app.idempotency import close_redis as close_idempotency_redis
 from app.routes.tasks import router as tasks_router, close_sender
 from app.routes.projects import router as projects_router
 from app.telemetry import init_telemetry
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
     init_telemetry(app, service_name="task-service", db_engine=engine)
     yield
     await close_sender()
+    await close_idempotency_redis()
     await engine.dispose()
     logger.info("Task Service stopped")
 

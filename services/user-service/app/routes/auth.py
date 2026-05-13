@@ -29,7 +29,14 @@ from app.audit import log_login_failure, log_login_success, log_registration
 from app.config import settings
 from app.database import get_db
 from app.models import User
-from app.redis_client import consume_refresh_token, revoke_refresh_token, store_refresh_token
+from app.redis_client import (
+    consume_refresh_token,
+    is_account_locked,
+    record_login_failure,
+    reset_login_failures,
+    revoke_refresh_token,
+    store_refresh_token,
+)
 from app.schemas import (
     LoginRequest, LogoutRequest, RefreshRequest,
     TokenResponse, UserCreate, UserResponse,
@@ -120,22 +127,64 @@ async def login(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
+    """
+    Authenticate with email + password. Returns JWT + opaque refresh token.
+
+    BRUTE FORCE PROTECTION (per-account):
+      The gateway rate-limits by IP address (10 req/min). An attacker who
+      rotates IPs bypasses the IP limit but is caught here: we track failed
+      attempts per email in Redis. After LOCKOUT_THRESHOLD failures within
+      LOCKOUT_WINDOW_SECONDS, all further attempts return 401 regardless of
+      password correctness.
+
+      ENUMERATION RESISTANCE: Both "wrong password" and "account locked" return
+      the same 401 body. The attacker can't distinguish them — they just see
+      a constant stream of failures and can't confirm the account exists or
+      is locked.
+
+      The timing-safe dummy hash path still runs for non-existent accounts
+      even if the lockout check fires, so timing analysis reveals nothing.
+    """
     ip = _client_ip(request)
+
+    # ── Step 1: Check per-account lockout BEFORE hitting the DB or bcrypt. ──
+    # If the account is locked we still run the full auth path for timing
+    # consistency, then return 401 at the end. This prevents timing-based
+    # enumeration: locked real accounts and non-existent accounts both take
+    # the same amount of time.
+    account_is_locked = await is_account_locked(payload.email)
+
+    # ── Step 2: Fetch user + timing-safe bcrypt. ──────────────────────────
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
     candidate_hash = user.hashed_password if user else _DUMMY_HASH
     password_ok = await _verify_password(payload.password, candidate_hash)
 
-    if not user or not password_ok:
-        log_login_failure(payload.email, "invalid_credentials", ip)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Invalid email or password")
+    # ── Step 3: Evaluate outcome. ───────────────────────────────────
+    if account_is_locked or not user or not password_ok:
+        reason = "account_locked" if account_is_locked else "invalid_credentials"
+        log_login_failure(payload.email, reason, ip)
+        # Always increment the counter, even on lockout, to keep the count
+        # accurate. (It won't matter to the user, already locked.)
+        if user and not account_is_locked:
+            # Only increment for real accounts with wrong passwords. Don't
+            # increment for non-existent accounts (would allow DoS by
+            # pre-locking accounts with fake attempts against a valid email
+            # from a leaked list).
+            await record_login_failure(payload.email)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
     if not user.is_active:
         log_login_failure(payload.email, "account_deactivated", ip)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
 
+    # ── Step 4: Successful login. ────────────────────────────────────
     user.last_login_at = datetime.now(timezone.utc)
+    await reset_login_failures(payload.email)  # Clear the failure counter
     log_login_success(str(user.id), user.email, ip)
     return await _issue_token_response(user)
 

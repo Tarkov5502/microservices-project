@@ -31,12 +31,40 @@ logger = logging.getLogger(__name__)
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, exempt_paths: list[str] | None = None):
+    """
+    Validates Bearer JWTs on every inbound request.
+
+    EXEMPT PATHS vs EXEMPT PREFIXES:
+      exact_exempt_paths — full path strings ("/health", "/metrics").
+      exempt_prefixes    — path prefixes. Any path starting with a prefix is
+                           exempt. Used for the entire /api/v1/auth/* family:
+
+        /api/v1/auth/login    — no token exists yet
+        /api/v1/auth/register — same
+        /api/v1/auth/refresh  — carries a refresh token, not a JWT
+        /api/v1/auth/logout   — must work even with an expired JWT so the
+                               client can always revoke its refresh token
+
+      These MUST be exempt or the system is a deadlock: you cannot get a
+      token without calling login, and login requires a token.
+    """
+    def __init__(
+        self,
+        app,
+        exempt_paths: list[str] | None = None,
+        exempt_prefixes: list[str] | None = None,
+    ):
         super().__init__(app)
-        self.exempt_paths = set(exempt_paths or [])
+        self._exempt_paths: frozenset[str] = frozenset(exempt_paths or [])
+        self._exempt_prefixes: tuple[str, ...] = tuple(exempt_prefixes or [])
+
+    def _is_exempt(self, path: str) -> bool:
+        if path in self._exempt_paths:
+            return True
+        return any(path.startswith(p) for p in self._exempt_prefixes)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if request.url.path in self.exempt_paths:
+        if self._is_exempt(request.url.path):
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization", "")

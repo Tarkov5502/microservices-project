@@ -6,10 +6,10 @@ Key design decisions:
      or assignee. Without this, any authenticated user can read/modify/delete any
      other user's tasks — a textbook Broken Object-Level Authorization flaw.
 
-  2. PROJECT MEMBERSHIP: create_task now verifies the target project exists AND
-     the caller is its owner before allowing task creation. Without this check,
-     a user who knows (or guesses) a project UUID could create tasks inside
-     another user's project.
+  2. PROJECT MEMBERSHIP: create_task verifies the target project exists AND the
+     caller is its owner before allowing task creation. Without this check, a user
+     who knows (or guesses) a project UUID could create tasks inside another user's
+     project.
 
   3. EVENT-AFTER-COMMIT: Events published via FastAPI BackgroundTasks run AFTER
      the response is sent, which is after get_db()'s finally block has committed.
@@ -21,15 +21,17 @@ Key design decisions:
   5. PATCH SEMANTICS: Uses exclude_unset=True (not exclude_none) so clients can
      explicitly null-out nullable fields like assignee_id and description.
 
-  6. PAGINATION: list_tasks accepts limit (max 200) and offset so callers can
-     page through all tasks rather than being silently capped at 100.
+  6. IDEMPOTENCY: create_task accepts an optional Idempotency-Key header. On a
+     duplicate request with the same key, the original 201 response is returned
+     from Redis without re-executing the DB write. See app/idempotency.py.
 """
 import json
 import uuid
 import logging
 import asyncio
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Response, status, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from azure.servicebus.aio import ServiceBusClient, ServiceBusSender
@@ -37,6 +39,7 @@ from azure.servicebus import ServiceBusMessage
 
 from app.database import get_db
 from app.dependencies import CallerID
+from app.idempotency import get_cached_response, cache_response
 from app.models import Task, Project, TaskStatus
 from app.schemas import TaskCreate, TaskUpdate, TaskResponse
 from app.config import settings
@@ -167,10 +170,56 @@ async def create_task(
     background: BackgroundTasks,
     caller_id: CallerID,
     db: AsyncSession = Depends(get_db),
-) -> TaskResponse:
+    idempotency_key: str | None = Header(
+        None,
+        alias="Idempotency-Key",
+        description=(
+            "Optional UUID4 string. If provided, duplicate requests with the same key "
+            "return the original 201 response from cache without creating a second task. "
+            "Keys expire after 24 hours. Scoped per user — different users may reuse keys."
+        ),
+    ),
+) -> Response:
+    """
+    Create a new task.
+
+    IDEMPOTENCY:
+      Supply an `Idempotency-Key: <uuid4>` header on the first request.
+      If the request times out or the connection drops, retry with the SAME
+      key. The server returns the original 201 response without creating a
+      second task. Keys are valid for 24 hours.
+
+      Client example:
+        curl -X POST /api/v1/tasks \\
+          -H 'Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000' \\
+          -H 'Authorization: Bearer ...' \\
+          -d '{...}'
+
+      If you omit the header, the endpoint works normally but is NOT
+      idempotent — retries may create duplicate tasks.
+    """
+    # ── Idempotency check ─────────────────────────────────────────────────
+    if idempotency_key:
+        cached = await get_cached_response(caller_id, idempotency_key)
+        if cached is not None:
+            cached_status, cached_body = cached
+            logger.info(
+                "Idempotency cache HIT for key %r (caller %s) — returning cached %d",
+                idempotency_key, caller_id, cached_status,
+            )
+            # Return the exact same response as the original request.
+            # The Idempotency-Key-Replay header signals to the client that
+            # this is a replayed response, not a new creation.
+            return JSONResponse(
+                content=cached_body,
+                status_code=cached_status,
+                headers={"Idempotency-Key-Replay": "true"},
+            )
+
+    # ── Normal creation path ─────────────────────────────────────────────
     # FIX: Verify the project exists and the caller owns it before allowing
-    # task creation inside it. Without this, any user can create tasks in
-    # any project by knowing or guessing the project UUID.
+    # task creation. Without this, any user can create tasks in any project
+    # by knowing or guessing the project UUID (BOLA at creation level).
     await _get_owned_project(payload.project_id, caller_id, db)
 
     task = Task(
@@ -182,6 +231,9 @@ async def create_task(
     await db.flush()
     await db.refresh(task)
 
+    response_data = TaskResponse.model_validate(task)
+    response_body = response_data.model_dump(mode="json")
+
     event_data = {
         "task_id": str(task.id),
         "title": task.title,
@@ -190,7 +242,23 @@ async def create_task(
         "assignee_id": str(task.assignee_id) if task.assignee_id else None,
     }
     background.add_task(_publish_event, "task.created", event_data)
-    return TaskResponse.model_validate(task)
+
+    # ── Cache for idempotency replay ────────────────────────────────
+    # Cache AFTER the response is built. If caching fails (Redis down), the
+    # creation still succeeds. The client just won't get replay protection.
+    if idempotency_key:
+        background.add_task(
+            cache_response,
+            caller_id,
+            idempotency_key,
+            status.HTTP_201_CREATED,
+            response_body,
+        )
+
+    return JSONResponse(
+        content=response_body,
+        status_code=status.HTTP_201_CREATED,
+    )
 
 
 @router.get("/", response_model=CursorPage[TaskResponse])
@@ -280,10 +348,14 @@ async def update_task(
 
     if payload.status is not None and task.status != old_status:
         background.add_task(_publish_event, "task.status_changed", {
-            "task_id": str(task.id),
+            "task_id":    str(task.id),
             "old_status": old_status.value,
             "new_status": task.status.value,
             "updated_by": str(caller_id),
+            # Include stakeholder IDs so the consumer can target SSE delivery
+            # to the right users without a DB lookup.
+            "creator_id":  str(task.creator_id),
+            "assignee_id": str(task.assignee_id) if task.assignee_id else None,
         })
     return TaskResponse.model_validate(task)
 
@@ -297,6 +369,12 @@ async def delete_task(
 ) -> None:
     """Delete a task. Only the creator may delete it."""
     task = await _get_authorized_task(task_id, caller_id, db, require_owner=True)
-    task_id_str = str(task.id)
+    # Capture stakeholder IDs before deletion — the ORM object won't be
+    # readable after db.delete() executes.
+    event_data = {
+        "task_id":    str(task.id),
+        "creator_id":  str(task.creator_id),
+        "assignee_id": str(task.assignee_id) if task.assignee_id else None,
+    }
     await db.delete(task)
-    background.add_task(_publish_event, "task.deleted", {"task_id": task_id_str})
+    background.add_task(_publish_event, "task.deleted", event_data)

@@ -124,7 +124,13 @@ app.add_middleware(CorrelationMiddleware)
 
 app.add_middleware(
     JWTAuthMiddleware,
+    # Exact paths that need no token (health + metrics probes)
     exempt_paths=["/health", "/health/ready", "/metrics"],
+    # Prefix exemptions: every /api/v1/auth/* route is unauthenticated by design.
+    # Login/register have no token yet. Refresh carries an opaque refresh token
+    # (not a JWT). Logout must work with an expired JWT so sessions can always
+    # be cleanly revoked.
+    exempt_prefixes=["/api/v1/auth/"],
 )
 
 # ─── Routes ───────────────────────────────────────────────────────────────────

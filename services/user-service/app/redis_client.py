@@ -3,6 +3,7 @@ user-service/app/redis_client.py — Shared async Redis client.
 
 PURPOSE:
   - Refresh token storage: opaque UUID4 token → user_id (TTL: 30 days)
+  - Per-account login failure tracking for brute-force lockout
 
 WHY OPAQUE REFRESH TOKENS OVER LONG-LIVED JWTs?
   A long-lived JWT can't be revoked before expiry. If it leaks, the attacker
@@ -22,10 +23,31 @@ TOKEN ROTATION:
     next refresh attempt will fail (token already used/rotated). They must log in.
   - The security window is at most one refresh cycle.
 
+PER-ACCOUNT BRUTE FORCE LOCKOUT:
+  The API gateway rate-limits by IP address. An attacker with multiple IPs
+  (botnet / proxy rotation) can bypass IP limits and still target a single
+  account indefinitely. Per-account tracking closes this gap:
+
+    Key:   login_fail:{email}
+    Value: integer failure count
+    TTL:   LOCKOUT_WINDOW_SECONDS (15 minutes), set on FIRST failure only.
+
+  The window is FIXED from the first failure: 10 failures in 15 minutes
+  locks the account for the remainder of that window. This is intentionally
+  simpler than a sliding window — for lockout purposes, a fixed window is
+  correct and avoids the sliding-window INCR+EXPIRE reset edge case.
+
+  SECURITY NOTE — Enumeration resistance:
+    The auth route always returns 401 "Invalid email or password" regardless
+    of whether the account exists or is locked. An attacker cannot distinguish
+    a locked account from a wrong password. The legitimate user experiences
+    a frozen account and must wait for the lockout to expire (or contact
+    support). This is a deliberate UX trade-off for security.
+
 GRACEFUL DEGRADATION:
-  If Redis is unavailable, refresh tokens are disabled — login still works,
-  users just can't refresh and must re-authenticate when their JWT expires.
-  The client sees a 503 on the /refresh endpoint rather than a silent hang.
+  If Redis is unavailable, refresh tokens and lockout tracking are disabled.
+  Login still works, users can't refresh until Redis recovers, and brute
+  force protection falls back to the gateway IP rate limiter alone.
 """
 import logging
 import redis.asyncio as aioredis
@@ -38,6 +60,11 @@ _client: aioredis.Redis | None = None
 
 REFRESH_TOKEN_TTL = 60 * 60 * 24 * 30  # 30 days in seconds
 _REFRESH_KEY_PREFIX = "refresh:"
+
+# Brute-force lockout constants
+LOCKOUT_THRESHOLD = 10        # Max failed attempts before lockout
+LOCKOUT_WINDOW_SECONDS = 900  # 15-minute fixed window
+_LOGIN_FAIL_PREFIX = "login_fail:"
 
 
 async def get_redis() -> aioredis.Redis | None:
@@ -103,3 +130,73 @@ async def revoke_refresh_token(token: str) -> None:
     if not client:
         return
     await client.delete(f"{_REFRESH_KEY_PREFIX}{token}")
+
+
+# ─── Per-Account Brute Force Lockout ─────────────────────────────────────────
+
+async def is_account_locked(email: str) -> bool:
+    """
+    Check whether an account has exceeded the login failure threshold.
+
+    Returns True if the failure count is at or above LOCKOUT_THRESHOLD.
+    Returns False if Redis is unavailable (fail open — don't block all logins
+    because Redis is down).
+    """
+    client = await get_redis()
+    if not client:
+        return False
+    try:
+        raw = await client.get(f"{_LOGIN_FAIL_PREFIX}{email}")
+        if raw is None:
+            return False
+        return int(raw) >= LOCKOUT_THRESHOLD
+    except Exception as exc:
+        logger.error("Lockout check failed for %s: %s", email, exc)
+        return False  # Fail open
+
+
+async def record_login_failure(email: str) -> int:
+    """
+    Increment the failure counter for an account and set a TTL on first failure.
+
+    TTL is set with NX (only if not already set) so the window is anchored to
+    the FIRST failure in the sequence, not extended by each subsequent attempt.
+    This prevents an attacker from perpetually resetting the lockout window
+    by timing one attempt every LOCKOUT_WINDOW_SECONDS - 1 seconds.
+
+    Returns the current failure count after increment.
+    Returns 0 if Redis is unavailable.
+    """
+    client = await get_redis()
+    if not client:
+        return 0
+    key = f"{_LOGIN_FAIL_PREFIX}{email}"
+    try:
+        async with client.pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            # nx=True: only set the expiry if the key is new (first failure).
+            # Keeps the window anchored to the first failure, not each one.
+            pipe.expire(key, LOCKOUT_WINDOW_SECONDS, nx=True)
+            results = await pipe.execute()
+        count: int = results[0]
+        logger.info("Login failure #%d for account: %s", count, email)
+        return count
+    except Exception as exc:
+        logger.error("record_login_failure failed for %s: %s", email, exc)
+        return 0
+
+
+async def reset_login_failures(email: str) -> None:
+    """
+    Clear the failure counter for an account after a successful login.
+
+    Called on successful authentication so a legitimate user who previously
+    failed doesn't stay locked out after they remember their password.
+    """
+    client = await get_redis()
+    if not client:
+        return
+    try:
+        await client.delete(f"{_LOGIN_FAIL_PREFIX}{email}")
+    except Exception as exc:
+        logger.error("reset_login_failures failed for %s: %s", email, exc)

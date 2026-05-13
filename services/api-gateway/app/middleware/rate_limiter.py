@@ -30,6 +30,21 @@ FALLBACK:
   the gateway keeps serving traffic even during a Redis outage — it just
   loses cross-replica coordination temporarily.
 
+RATE LIMIT HEADERS:
+  Every response carries three standard headers:
+    X-RateLimit-Limit     — the max requests allowed in the window
+    X-RateLimit-Remaining — requests left in the current window
+    X-RateLimit-Reset     — Unix epoch (seconds) when the window resets
+
+  X-RateLimit-Reset uses a fixed-window approximation: now + window_seconds.
+  For a true sliding window the reset time varies per request, but clients
+  use this value to decide how long to back off — a conservative upper bound
+  (now + window) is correct: the client will never have to wait longer than
+  that for a fresh window to open.
+
+  429 responses additionally include Retry-After (seconds until reset) for
+  HTTP/1.1 clients that don't parse X-RateLimit-Reset.
+
 IP EXTRACTION:
   See _extract_client_ip() for the X-Real-IP priority logic and
   log-injection sanitisation.
@@ -211,6 +226,10 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         limit = self.auth_max_requests if is_auth else self.max_requests
         key = f"rate:{scope}:{client_ip}"
 
+        # Reset time: conservative upper bound — the furthest this request
+        # could possibly stay within the window.
+        reset_ts = int(time.time()) + self.window_seconds
+
         store = await self._get_store()
         is_limited, count = await store.check_and_increment(key, limit, self.window_seconds)
 
@@ -219,11 +238,16 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={"detail": "Rate limit exceeded. Try again later."},
-                headers={"Retry-After": str(self.window_seconds)},
+                headers={
+                    "Retry-After": str(self.window_seconds),
+                    "X-RateLimit-Limit":     str(limit),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset":     str(reset_ts),
+                },
             )
 
         response = await call_next(request)
-        response.headers["X-RateLimit-Limit"] = str(limit)
-        remaining = max(0, limit - count)
-        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Limit"]     = str(limit)
+        response.headers["X-RateLimit-Remaining"] = str(max(0, limit - count))
+        response.headers["X-RateLimit-Reset"]     = str(reset_ts)
         return response
