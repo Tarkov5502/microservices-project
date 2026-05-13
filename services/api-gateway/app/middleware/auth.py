@@ -77,10 +77,43 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             )
 
         token = auth_header[7:].strip()  # Remove exactly 7 chars: "bearer "
+        # ── Keyring-aware verification ──────────────────────────────────────
+        # Inspect the JOSE header without verifying first, so we can pick the
+        # correct secret based on the `kid` claim. Then verify normally with
+        # that secret. Tokens with an unknown kid are rejected.
+        try:
+            unverified_header = jwt.get_unverified_header(token)
+        except jwt.InvalidTokenError as exc:
+            logger.warning("Malformed JWT header: %s", exc)
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Invalid token"},
+            )
+
+        from app.jwt_keyring import parse_keyring, select_verification_key
+        try:
+            keyring = parse_keyring(settings.jwt_secrets, settings.jwt_secret)
+        except Exception as exc:
+            logger.error("JWT keyring is misconfigured: %s", exc)
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "Server misconfigured"},
+            )
+        secret = select_verification_key(keyring, unverified_header.get("kid"))
+        if secret is None:
+            logger.warning(
+                "JWT references unknown kid=%r — token rejected",
+                unverified_header.get("kid"),
+            )
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Invalid token"},
+            )
+
         try:
             payload = jwt.decode(
                 token,
-                settings.jwt_secret,
+                secret,
                 algorithms=[settings.jwt_algorithm],
             )
 

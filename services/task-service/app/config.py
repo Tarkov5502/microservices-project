@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     servicebus_connection_string: str = ""
     servicebus_topic_tasks: str = "task-events"
 
+    # ── Inter-service identity HMAC ─────────────────────────────────────────
+    # Shared secret with the api-gateway used to verify signed X-User-*
+    # headers. See user-service/app/config.py for the rationale.
+    interservice_hmac_secret: str = "dev-only-interservice-secret-change-in-production-please"
+
     # ── Database connection pool ─────────────────────────────────────────────
     # See user-service/app/config.py for the rationale on these knobs. Mirror
     # the defaults so both services scale the same way unless explicitly

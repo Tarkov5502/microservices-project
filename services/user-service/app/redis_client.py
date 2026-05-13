@@ -200,3 +200,59 @@ async def reset_login_failures(email: str) -> None:
         await client.delete(f"{_LOGIN_FAIL_PREFIX}{email}")
     except Exception as exc:
         logger.error("reset_login_failures failed for %s: %s", email, exc)
+
+
+# ─── Email verification + password reset tokens ─────────────────────────────
+#
+# Two single-use token spaces with different prefixes and lifetimes:
+#
+#   verify:{token}   → user_id  (TTL = email_verification_token_ttl_seconds)
+#   reset:{token}    → user_id  (TTL = password_reset_token_ttl_seconds)
+#
+# Both are consumed atomically via GETDEL so a single token can never be
+# used twice — important for password reset, where an attacker who replays a
+# reset link must NOT get a working session.
+#
+# If Redis is unavailable, store_* returns False (caller must surface that
+# back to the user as "email service unavailable"); consume_* returns None
+# (which the caller treats as "invalid or expired token").
+
+_VERIFY_KEY_PREFIX = "verify:"
+_RESET_KEY_PREFIX  = "reset:"
+
+
+async def store_email_verification_token(token: str, user_id: str, ttl_seconds: int) -> bool:
+    client = await get_redis()
+    if not client:
+        return False
+    await client.setex(f"{_VERIFY_KEY_PREFIX}{token}", ttl_seconds, user_id)
+    return True
+
+
+async def consume_email_verification_token(token: str) -> str | None:
+    """
+    Single-use: GETDEL. Returns the user_id this token belongs to, or None
+    if the token is unknown / expired / Redis is down.
+    """
+    client = await get_redis()
+    if not client:
+        return None
+    user_id: str | None = await client.getdel(f"{_VERIFY_KEY_PREFIX}{token}")
+    return user_id
+
+
+async def store_password_reset_token(token: str, user_id: str, ttl_seconds: int) -> bool:
+    client = await get_redis()
+    if not client:
+        return False
+    await client.setex(f"{_RESET_KEY_PREFIX}{token}", ttl_seconds, user_id)
+    return True
+
+
+async def consume_password_reset_token(token: str) -> str | None:
+    """Same single-use semantics as email verification."""
+    client = await get_redis()
+    if not client:
+        return None
+    user_id: str | None = await client.getdel(f"{_RESET_KEY_PREFIX}{token}")
+    return user_id

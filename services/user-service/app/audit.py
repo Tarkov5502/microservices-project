@@ -90,3 +90,35 @@ def log_password_changed(user_id: str, ip: str | None = None) -> None:
         "user_id": user_id,
         "client_ip": ip,
     })
+
+
+def log_self_deactivation(user_id: str, email: str) -> None:
+    """User soft-deleted their own account."""
+    _emit("self_deactivation", {
+        "user_id": user_id,
+        "email": email,
+    })
+
+
+def log_self_hard_delete(user_id: str, email: str) -> None:
+    """User permanently deleted their own account (GDPR right-to-erasure)."""
+    _emit("self_hard_delete", {
+        "user_id": user_id,
+        "email": email,
+    })
+
+
+def log_email_verified(user_id: str, email: str) -> None:
+    """User confirmed ownership of their email via a verification link."""
+    _emit("email_verified", {
+        "user_id": user_id,
+        "email": email,
+    })
+
+
+def log_password_reset(user_id: str, email: str) -> None:
+    """User reset their password via a reset-token flow."""
+    _emit("password_reset", {
+        "user_id": user_id,
+        "email": email,
+    })

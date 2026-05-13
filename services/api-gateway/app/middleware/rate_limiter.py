@@ -177,12 +177,19 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         max_requests: int = 100,
         window_seconds: int = 60,
         auth_max_requests: int = 10,
+        user_max_requests: int = 300,
         redis_url: str | None = None,
     ):
         super().__init__(app)
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.auth_max_requests = auth_max_requests
+        # Per-authenticated-user budget, applied in ADDITION to the per-IP
+        # budget. A user on a corporate NAT can saturate the per-IP bucket
+        # through no fault of their own; the per-user limit gives them their
+        # own budget. An attacker who steals a single JWT is still capped at
+        # this rate regardless of how many IPs they rotate through.
+        self.user_max_requests = user_max_requests
         self._redis_url = redis_url
         self._store: _RedisStore | _InMemoryStore | None = None
 
@@ -217,37 +224,80 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         return self._store
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """
+        Enforce two independent buckets:
+          - per-IP, always
+          - per-user-id, IF the request is authenticated (JWTAuth middleware
+            has run upstream and populated request.state.user_id)
+
+        Either bucket can produce a 429. Response headers describe the
+        most-restrictive of the two so a client knows which budget to back
+        off against.
+        """
         if request.url.path in _EXEMPT_PATHS:
             return await call_next(request)
 
         client_ip = _extract_client_ip(request)
-        is_auth = request.url.path in _AUTH_PATHS
-        scope = "auth" if is_auth else "general"
-        limit = self.auth_max_requests if is_auth else self.max_requests
-        key = f"rate:{scope}:{client_ip}"
+        is_auth_path = request.url.path in _AUTH_PATHS
+        scope = "auth" if is_auth_path else "general"
+        ip_limit = self.auth_max_requests if is_auth_path else self.max_requests
+        ip_key = f"rate:{scope}:{client_ip}"
 
         # Reset time: conservative upper bound — the furthest this request
         # could possibly stay within the window.
         reset_ts = int(time.time()) + self.window_seconds
 
         store = await self._get_store()
-        is_limited, count = await store.check_and_increment(key, limit, self.window_seconds)
 
-        if is_limited:
-            logger.warning("Rate limit exceeded for %s on %s", client_ip, scope)
+        # ── Per-IP bucket ─────────────────────────────────────────────────
+        ip_over, ip_count = await store.check_and_increment(
+            ip_key, ip_limit, self.window_seconds
+        )
+        ip_remaining = max(0, ip_limit - ip_count)
+
+        # ── Per-user bucket (only for authenticated requests) ─────────────
+        user_id = getattr(request.state, "user_id", None)
+        user_over = False
+        user_remaining = self.user_max_requests
+        if user_id:
+            user_key = f"rate:user:{user_id}"
+            user_over, user_count = await store.check_and_increment(
+                user_key, self.user_max_requests, self.window_seconds
+            )
+            user_remaining = max(0, self.user_max_requests - user_count)
+
+        # ── Decide which (if any) limit fired ─────────────────────────────
+        if ip_over or user_over:
+            which = "ip" if ip_over else "user"
+            logger.warning(
+                "Rate limit exceeded — scope=%s by=%s ip=%s user=%s",
+                scope, which, client_ip, user_id,
+            )
+            # Report the more-restrictive limit so the client backs off
+            # against the right budget.
+            reported_limit = ip_limit if ip_over else self.user_max_requests
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={"detail": "Rate limit exceeded. Try again later."},
                 headers={
-                    "Retry-After": str(self.window_seconds),
-                    "X-RateLimit-Limit":     str(limit),
-                    "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset":     str(reset_ts),
+                    "Retry-After":            str(self.window_seconds),
+                    "X-RateLimit-Limit":      str(reported_limit),
+                    "X-RateLimit-Remaining":  "0",
+                    "X-RateLimit-Reset":      str(reset_ts),
+                    "X-RateLimit-Scope":      which,
                 },
             )
 
         response = await call_next(request)
-        response.headers["X-RateLimit-Limit"]     = str(limit)
-        response.headers["X-RateLimit-Remaining"] = str(max(0, limit - count))
-        response.headers["X-RateLimit-Reset"]     = str(reset_ts)
+        # Surface the tighter of the two budgets in the response headers so
+        # clients pace themselves against the binding constraint.
+        if user_id and user_remaining < ip_remaining:
+            response.headers["X-RateLimit-Limit"]     = str(self.user_max_requests)
+            response.headers["X-RateLimit-Remaining"] = str(user_remaining)
+            response.headers["X-RateLimit-Scope"]     = "user"
+        else:
+            response.headers["X-RateLimit-Limit"]     = str(ip_limit)
+            response.headers["X-RateLimit-Remaining"] = str(ip_remaining)
+            response.headers["X-RateLimit-Scope"]     = "ip"
+        response.headers["X-RateLimit-Reset"] = str(reset_ts)
         return response

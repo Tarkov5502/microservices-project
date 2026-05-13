@@ -9,6 +9,8 @@ from sqlalchemy import text
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
+from app.security_headers import SecurityHeadersMiddleware
+from app.identity_signing import IdentityVerifierMiddleware
 from app.database import engine, Base
 from app.idempotency import close_redis as close_idempotency_redis
 from app.routes.tasks import router as tasks_router, close_sender
@@ -47,6 +49,21 @@ app = FastAPI(
 )
 
 # SECURITY: No CORSMiddleware on internal services. See user-service comment.
+# Defence-in-depth security headers. Applied to every response so that
+# even if NetworkPolicy is misconfigured and a browser reaches this
+# service directly, our responses are still hardened. Cheap and additive.
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Verify that X-User-* headers were signed by the gateway. Reject any
+# request that claims an identity without a valid signature. Health
+# and metrics endpoints are exempt because they're hit by kubelet /
+# Prometheus, not via the gateway.
+app.add_middleware(
+    IdentityVerifierMiddleware,
+    secret=settings.interservice_hmac_secret,
+    exempt_paths=["/health", "/health/ready", "/metrics"],
+)
+
 app.include_router(tasks_router,    prefix="/api/v1/tasks",    tags=["Tasks"])
 app.include_router(projects_router, prefix="/api/v1/projects", tags=["Projects"])
 

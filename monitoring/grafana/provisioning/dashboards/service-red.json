@@ -1,0 +1,163 @@
+{
+  "uid": "service-red",
+  "title": "Service RED — Rate / Errors / Duration",
+  "tags": ["microservices", "red", "sre"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "api-gateway,user-service,task-service,notification-service",
+        "current": { "text": "api-gateway", "value": "api-gateway" },
+        "options": [
+          { "text": "api-gateway",          "value": "api-gateway",          "selected": true },
+          { "text": "user-service",         "value": "user-service",         "selected": false },
+          { "text": "task-service",         "value": "task-service",         "selected": false },
+          { "text": "notification-service", "value": "notification-service", "selected": false }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Request rate (req/s)",
+      "description": "Sliding-window mean of HTTP requests per second. The first of the four Golden Signals.",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_requests_total{job=\"$service\"}[1m]))",
+          "legendFormat": "rps"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Error rate (%)",
+      "description": "Percent of HTTP responses with a 5xx status code over the last minute. SLO budget burns from here.",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "red",    "value": 1.0 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "100 * (sum(rate(gateway_requests_total{job=\"$service\",status_code=~\"5..\"}[1m])) / sum(rate(gateway_requests_total{job=\"$service\"}[1m])))",
+          "legendFormat": "5xx %"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "p95 latency (s)",
+      "description": "95th percentile request duration. Track this against your service's SLO target — typically 200-500 ms for user-facing routes.",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red",    "value": 1.0 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_seconds_bucket{job=\"$service\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Saturation (CPU %)",
+      "description": "Container CPU usage. When this approaches the resources.limits.cpu set on the deployment, queues start growing — the 'S' in RED+S.",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "targets": [
+        {
+          "expr": "100 * sum(rate(container_cpu_usage_seconds_total{pod=~\"$service-.*\"}[1m])) / sum(kube_pod_container_resource_limits{pod=~\"$service-.*\",resource=\"cpu\"})",
+          "legendFormat": "cpu %"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Requests by status code",
+      "description": "Stacked timeseries — green (2xx) should dominate, anything 5xx should be visually startling.",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 30, "stacking": { "mode": "normal" } } } },
+      "targets": [
+        {
+          "expr": "sum by (status_code) (rate(gateway_requests_total{job=\"$service\"}[1m]))",
+          "legendFormat": "{{status_code}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Latency percentiles",
+      "description": "p50 / p95 / p99 over time. Watch for p99 separating from p95 — that's tail-latency degradation, often the first sign of a slow dependency.",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(gateway_request_duration_seconds_bucket{job=\"$service\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_seconds_bucket{job=\"$service\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket{job=\"$service\"}[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Top-N slow endpoints (p95)",
+      "description": "Per-route p95 latency. Useful for narrowing in on which path is degrading — often a single endpoint dominates the service-wide p95.",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "topk(5, histogram_quantile(0.95, sum by (path, le) (rate(gateway_request_duration_seconds_bucket{job=\"$service\"}[5m]))))",
+          "legendFormat": "{{path}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Rate-limit rejections",
+      "description": "Requests rejected with 429. A sustained nonzero value means a real client is hitting the cap; a brief spike usually means an attack or buggy retry storm.",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_requests_total{job=\"$service\",status_code=\"429\"}[1m]))",
+          "legendFormat": "429/sec"
+        }
+      ]
+    }
+  ]
+}

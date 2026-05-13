@@ -130,13 +130,28 @@ def _build_forward_headers(request: Request) -> dict[str, str]:
     headers["X-Forwarded-Proto"] = request.url.scheme
     headers["X-Forwarded-Host"] = request.url.hostname or ""
 
-    # Inject gateway-validated identity (from JWT middleware)
-    if user_id := getattr(request.state, "user_id", None):
+    # Inject gateway-validated identity (from JWT middleware), then SIGN it.
+    # The backend services verify this signature before trusting any of the
+    # X-User-* fields — see services/*/app/identity_signing.py for the rationale.
+    user_id = getattr(request.state, "user_id", None)
+    user_email = getattr(request.state, "user_email", None) or ""
+    user_roles_list = getattr(request.state, "user_roles", None) or []
+    user_roles = ",".join(user_roles_list)
+    if user_id:
         headers["X-User-Id"] = str(user_id)
-    if user_email := getattr(request.state, "user_email", None):
-        headers["X-User-Email"] = user_email
-    if user_roles := getattr(request.state, "user_roles", None):
-        headers["X-User-Roles"] = ",".join(user_roles) if user_roles else ""
+        if user_email:
+            headers["X-User-Email"] = user_email
+        headers["X-User-Roles"] = user_roles
+
+        from app.identity_signing import sign_identity, IDENTITY_SIG_HEADER, IDENTITY_TS_HEADER
+        sig, issued_at = sign_identity(
+            settings.interservice_hmac_secret,
+            str(user_id),
+            user_email,
+            user_roles,
+        )
+        headers[IDENTITY_SIG_HEADER] = sig
+        headers[IDENTITY_TS_HEADER] = issued_at
 
     # Propagate correlation ID — threads this request through all service logs
     if request_id := getattr(request.state, "request_id", None):

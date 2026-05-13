@@ -16,6 +16,13 @@ global:
   scrape_interval: 15s       # Poll every 15 seconds
   evaluation_interval: 15s   # Evaluate alert rules every 15 seconds
 
+
+# ─── Alert rules ──────────────────────────────────────────────────────────────
+# Load the alerting rules from a separate file so editors get YAML completion
+# and the rules can be evolved independently of the scrape config.
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
 scrape_configs:
   - job_name: "api-gateway"
     static_configs:

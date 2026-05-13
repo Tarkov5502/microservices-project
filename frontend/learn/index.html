@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Behind the Click — a tour of a real microservices platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  /*
+    Visual language inspired by Nicky Case's "Evolution of Trust" — warm
+    paper background, serif headings, generous whitespace, soft accent
+    colors. Anything black-and-tech-bro is deliberately avoided here.
+  */
+  :root {
+    --paper:     #fbf7ef;       /* aged paper background */
+    --ink:       #2d3a3a;       /* deep slate, not black */
+    --muted:     #6b7878;
+    --accent:    #2c7a87;       /* warm teal, primary action */
+    --warm:      #e07b3a;       /* coral, used sparingly */
+    --good:      #4a9d6a;
+    --bad:       #c45a4e;
+    --line:      #d8cdb8;       /* warm border line */
+    --soft-bg:   #f3ead9;       /* slightly darker than --paper */
+    --shadow:    0 1px 3px rgba(45, 58, 58, 0.08), 0 8px 24px rgba(45, 58, 58, 0.04);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--paper); color: var(--ink);
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 17px; line-height: 1.65;
+    min-height: 100vh;
+  }
+  h1, h2, h3 { font-family: "Lora", Georgia, serif; font-weight: 600; line-height: 1.2; }
+  h1 { font-size: 38px; margin: 0 0 18px; letter-spacing: -0.02em; }
+  h2 { font-size: 26px; margin: 36px 0 12px; }
+  p  { margin: 0 0 16px; }
+  code, pre, .mono { font-family: "JetBrains Mono", "Consolas", monospace; font-size: 0.92em; }
+  a { color: var(--accent); }
+  button {
+    font-family: inherit; font-size: 16px; font-weight: 500;
+    padding: 10px 18px; border-radius: 6px; cursor: pointer;
+    background: var(--accent); color: var(--paper); border: none;
+    transition: filter 0.15s, transform 0.05s;
+  }
+  button:hover { filter: brightness(1.08); }
+  button:active { transform: translateY(1px); }
+  button.ghost {
+    background: transparent; color: var(--ink); border: 1px solid var(--line);
+  }
+  button.ghost:hover { background: var(--soft-bg); filter: none; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.warm { background: var(--warm); }
+
+  /* ─── Layout ──────────────────────────────────────────────────────────── */
+  header.top {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(251, 247, 239, 0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: 12px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header.top .home {
+    font-family: "Lora", serif; font-size: 18px; font-weight: 600;
+    color: var(--ink); text-decoration: none;
+  }
+  header.top .home small { color: var(--muted); font-weight: 400; }
+  .progress {
+    flex: 1; display: flex; justify-content: center; gap: 6px;
+    margin: 0 24px; max-width: 480px;
+  }
+  .progress .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--line); cursor: pointer;
+    transition: background 0.2s, transform 0.15s;
+  }
+  .progress .dot.done { background: var(--muted); }
+  .progress .dot.current { background: var(--accent); transform: scale(1.4); }
+  .progress .dot:hover { background: var(--ink); }
+
+  main {
+    max-width: 760px; margin: 0 auto; padding: 60px 24px 140px;
+  }
+  .scene { animation: fadeUp 0.45s ease-out; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .scene .meta { color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em;
+                 font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+  .scene .stage {
+    margin: 32px 0; padding: 24px; border-radius: 12px;
+    background: var(--soft-bg); box-shadow: var(--shadow);
+    position: relative; overflow: hidden;
+  }
+  .stage svg { display: block; max-width: 100%; height: auto; }
+
+  /* ─── Footer nav ──────────────────────────────────────────────────────── */
+  footer.bottom {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: rgba(251, 247, 239, 0.92);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--line);
+    padding: 14px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    z-index: 10;
+  }
+  footer.bottom .counter { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+
+  /* ─── Reusable widget pieces ─────────────────────────────────────────── */
+  .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .controls label { color: var(--muted); font-size: 13px; }
+  .controls input[type=range] { accent-color: var(--accent); }
+  .readout {
+    display: inline-block; background: var(--paper);
+    padding: 4px 10px; border-radius: 4px; border: 1px solid var(--line);
+    font-variant-numeric: tabular-nums; min-width: 60px; text-align: right;
+  }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 12px; font-weight: 500;
+    background: var(--soft-bg); color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  .pill.good { background: rgba(74, 157, 106, 0.15); color: var(--good); border-color: var(--good); }
+  .pill.bad  { background: rgba(196, 90, 78, 0.15);  color: var(--bad);  border-color: var(--bad);  }
+  .pill.warm { background: rgba(224, 123, 58, 0.15); color: var(--warm); border-color: var(--warm); }
+
+  .toc {
+    position: fixed; top: 56px; right: 0; bottom: 56px;
+    width: 280px; padding: 24px;
+    background: var(--paper); border-left: 1px solid var(--line);
+    overflow-y: auto; transform: translateX(100%); transition: transform 0.3s;
+    z-index: 9;
+  }
+  .toc.open { transform: translateX(0); }
+  .toc h3 { margin-top: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin: 8px 0; cursor: pointer; }
+  .toc li:hover { color: var(--accent); }
+  .toc li.current { font-weight: 600; color: var(--accent); }
+
+  .tip { background: rgba(224, 123, 58, 0.08); border-left: 3px solid var(--warm);
+         padding: 10px 14px; margin: 16px 0; border-radius: 0 4px 4px 0; font-size: 15px; }
+  .tip strong { color: var(--warm); }
+
+  /* Mobile */
+  @media (max-width: 600px) {
+    h1 { font-size: 28px; }
+    main { padding: 36px 16px 120px; }
+    header.top { padding: 10px 16px; }
+    .progress { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <a class="home" href="../">
+    Behind the click <small>· a tour</small>
+  </a>
+  <div class="progress" id="progress"></div>
+  <button class="ghost" id="toc-btn" aria-label="Table of contents">☰ Scenes</button>
+</header>
+
+<aside class="toc" id="toc">
+  <h3>All scenes</h3>
+  <ol id="toc-list"></ol>
+</aside>
+
+<main id="mount"></main>
+
+<footer class="bottom">
+  <button class="ghost" id="prev">← Back</button>
+  <span class="counter" id="counter"></span>
+  <button id="next">Next →</button>
+</footer>
+
+<script>
+"use strict";
+
+// ─── Tiny DOM helpers ────────────────────────────────────────────────────
+const $ = (sel, root = document) => root.querySelector(sel);
+const el = (tag, attrs = {}, ...kids) => {
+  const n = tag.startsWith("svg:") || tag === "svg" || /^(path|rect|circle|line|g|text|defs|marker|polygon|polyline|ellipse|use|filter|stop|linearGradient|radialGradient)$/.test(tag)
+    ? document.createElementNS("http://www.w3.org/2000/svg", tag.replace(/^svg:/, ""))
+    : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.setAttribute("class", v);
+    else if (k === "style" && typeof v === "object") Object.assign(n.style, v);
+    else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === "html") n.innerHTML = v;
+    else n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null) continue;
+    if (typeof kid === "string") n.appendChild(document.createTextNode(kid));
+    else n.appendChild(kid);
+  }
+  return n;
+};
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ─── Save/restore current scene ───────────────────────────────────────────
+const SAVE_KEY = "tour.scene";
+function loadScene() {
+  try { return parseInt(localStorage.getItem(SAVE_KEY) || "0", 10) || 0; } catch { return 0; }
+}
+function saveScene(i) {
+  try { localStorage.setItem(SAVE_KEY, String(i)); } catch {}
+}
+
+// ─── Scene framework ──────────────────────────────────────────────────────
+const scenes = [];
+
+function defineScene(spec) {
+  scenes.push(spec);
+}
+
+let currentIdx = 0;
+let cleanupCurrent = null;
+
+function renderScene(idx) {
+  if (cleanupCurrent) { try { cleanupCurrent(); } catch {} cleanupCurrent = null; }
+  currentIdx = Math.max(0, Math.min(scenes.length - 1, idx));
+  saveScene(currentIdx);
+  const mount = $("#mount");
+  mount.innerHTML = "";
+  const scene = scenes[currentIdx];
+  const root = el("div", { class: "scene" });
+  cleanupCurrent = scene.render(root) || null;
+  mount.appendChild(root);
+  // Scroll to top of new scene
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  // Update chrome
+  updateProgress();
+  updateNav();
+}
+
+function updateProgress() {
+  const p = $("#progress");
+  p.innerHTML = "";
+  scenes.forEach((s, i) => {
+    const dot = el("span", {
+      class: "dot" + (i < currentIdx ? " done" : "") + (i === currentIdx ? " current" : ""),
+      title: s.title,
+      onclick: () => renderScene(i),
+    });
+    p.appendChild(dot);
+  });
+}
+
+function updateNav() {
+  $("#prev").disabled = currentIdx === 0;
+  $("#next").textContent = currentIdx === scenes.length - 1 ? "Done ✓" : "Next →";
+  $("#counter").textContent = `${currentIdx + 1} / ${scenes.length}`;
+  // TOC highlight
+  $$tocCurrent && $$tocCurrent.classList.remove("current");
+  const newCur = document.querySelector(`#toc-list li[data-i="${currentIdx}"]`);
+  if (newCur) { newCur.classList.add("current"); $$tocCurrent = newCur; }
+}
+
+let $$tocCurrent = null;
+
+function renderToc() {
+  const ol = $("#toc-list");
+  ol.innerHTML = "";
+  scenes.forEach((s, i) => {
+    const li = el("li", {
+      "data-i": String(i),
+      onclick: () => { renderScene(i); $("#toc").classList.remove("open"); },
+    }, s.title);
+    ol.appendChild(li);
+  });
+}
+
+// ─── Scenes ───────────────────────────────────────────────────────────────
+
+// SCENE 1: WELCOME ─────────────────────────────────────────────────────────
+defineScene({
+  title: "Behind the click",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "1 — Welcome"));
+    root.appendChild(el("h1", {}, "What's actually happening?"));
+    root.appendChild(el("p", { html:
+      "When you tap a button in a modern app — log in, send a message, post a photo — " +
+      "<em>a lot of computers</em> spring into action. Dozens of them. They route your request, check who " +
+      "you are, look up your data, save your changes, and tell you the result. All in under a second."
+    }));
+    root.appendChild(el("p", { html:
+      "Most of that machinery is invisible. This tour pulls back the curtain on a real, working platform — " +
+      "a multi-user task tracker built the way modern cloud apps actually are — and shows you, piece by piece, " +
+      "how every part fits together."
+    }));
+    root.appendChild(el("p", { html:
+      "No code required to follow along. Just curiosity. Click <b>Next</b> when you're ready."
+    }));
+
+    // Hero animation: cursor clicks, request flies off, hits city skyline,
+    // splits into pieces. Auto-loops.
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 700 280" xmlns="http://www.w3.org/2000/svg">
+        <!-- Phone outline -->
+        <g transform="translate(40, 50)">
+          <rect x="0" y="0" width="120" height="200" rx="14" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+          <rect x="14" y="20" width="92" height="160" rx="4" fill="#f3ead9"/>
+          <rect x="36" y="92" width="48" height="28" rx="4" fill="#2c7a87" id="hero-btn"/>
+          <text x="60" y="111" text-anchor="middle" fill="#fff" font-family="Inter" font-size="11" font-weight="600">Log in</text>
+        </g>
+        <!-- Cursor that taps -->
+        <g id="hero-cursor" transform="translate(110, 130)">
+          <polygon points="0,0 0,16 4,12 7,18 10,17 7,11 12,11" fill="#2d3a3a"/>
+        </g>
+        <!-- Datacenter "city" silhouette -->
+        <g transform="translate(440, 80)" opacity="0.95">
+          <rect x="0"   y="80" width="36" height="80" rx="2" fill="#2c7a87"/>
+          <rect x="44"  y="40" width="36" height="120" rx="2" fill="#2c7a87"/>
+          <rect x="88"  y="60" width="36" height="100" rx="2" fill="#2c7a87"/>
+          <rect x="132" y="20" width="36" height="140" rx="2" fill="#2c7a87"/>
+          <rect x="176" y="70" width="36" height="90" rx="2" fill="#2c7a87"/>
+          <!-- antennae -->
+          <line x1="60"  y1="40"  x2="60"  y2="20"  stroke="#2c7a87" stroke-width="2"/>
+          <line x1="150" y1="20"  x2="150" y2="0"   stroke="#2c7a87" stroke-width="2"/>
+          <text x="106" y="180" text-anchor="middle" font-family="Inter" font-size="11" fill="#6b7878">Azure datacenter</text>
+        </g>
+        <!-- Flying packet (the request) -->
+        <circle id="hero-packet" cx="180" cy="155" r="6" fill="#e07b3a" opacity="0"/>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    // Animate: cursor taps, button flashes, packet flies, hits the building cluster.
+    let stop = false;
+    async function loop() {
+      while (!stop) {
+        const btn = stage.querySelector("#hero-btn");
+        const cursor = stage.querySelector("#hero-cursor");
+        const packet = stage.querySelector("#hero-packet");
+
+        // cursor moves to button
+        cursor.style.transition = "transform 0.6s ease-out";
+        cursor.setAttribute("transform", "translate(95, 100)");
+        await wait(700);
+        // tap
+        btn.style.transition = "fill 0.1s";
+        btn.setAttribute("fill", "#e07b3a");
+        await wait(120);
+        btn.setAttribute("fill", "#2c7a87");
+        // launch packet
+        packet.setAttribute("cx", "100");
+        packet.setAttribute("cy", "155");
+        packet.style.opacity = "1";
+        packet.style.transition = "all 1.0s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+        await wait(40);
+        packet.setAttribute("cx", "540");
+        packet.setAttribute("cy", "180");
+        await wait(1100);
+        // reset
+        packet.style.opacity = "0";
+        packet.style.transition = "none";
+        cursor.style.transition = "transform 0.4s";
+        cursor.setAttribute("transform", "translate(110, 130)");
+        await wait(1400);
+      }
+    }
+    loop();
+    return () => { stop = true; };
+  },
+});
+
+// SCENE 2: WHY MICROSERVICES ──────────────────────────────────────────────
+defineScene({
+  title: "Why split it up?",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "2 — The big idea"));
+    root.appendChild(el("h1", {}, "Why split one app into many?"));
+    root.appendChild(el("p", { html:
+      "The old way: one big program that does everything. Authentication, tasks, notifications, billing — " +
+      "all in a single codebase running on a single server. We call that a <b>monolith</b>."
+    }));
+    root.appendChild(el("p", { html:
+      "It works fine when you're small. Then traffic grows, and a tiny problem in one corner of the code " +
+      "(say, a slow query for tasks) makes <em>everything</em> slow — even the parts that have nothing to do with tasks."
+    }));
+    root.appendChild(el("p", { html:
+      "Slide the dial below to see what happens to a monolith under load. Then click <b>Split it up</b>."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 700 240" xmlns="http://www.w3.org/2000/svg">
+        <g id="mono-view">
+          <rect x="280" y="40" width="140" height="160" rx="10" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+          <text x="350" y="32" text-anchor="middle" font-family="Lora" font-size="14" fill="#6b7878">monolith</text>
+          <text x="350" y="80"  text-anchor="middle" font-size="13" font-family="Inter">Auth</text>
+          <text x="350" y="105" text-anchor="middle" font-size="13" font-family="Inter">Tasks</text>
+          <text x="350" y="130" text-anchor="middle" font-size="13" font-family="Inter">Notifications</text>
+          <text x="350" y="155" text-anchor="middle" font-size="13" font-family="Inter">Search</text>
+          <text x="350" y="180" text-anchor="middle" font-size="13" font-family="Inter">Billing</text>
+          <rect id="mono-fill" x="282" y="200" width="136" height="0" fill="#c45a4e" opacity="0.4" rx="0"/>
+        </g>
+        <g id="micro-view" style="display:none;">
+          <g id="ms-grp">
+            <rect x="80"  y="80" width="100" height="80" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+            <text x="130" y="125" text-anchor="middle" font-size="13">Auth</text>
+            <rect id="ms-fill-1" x="82" y="160" width="96" height="0" fill="#c45a4e" opacity="0.4"/>
+
+            <rect x="220" y="80" width="100" height="80" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+            <text x="270" y="125" text-anchor="middle" font-size="13">Tasks</text>
+            <rect id="ms-fill-2" x="222" y="160" width="96" height="0" fill="#c45a4e" opacity="0.4"/>
+
+            <rect x="360" y="80" width="100" height="80" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+            <text x="410" y="125" text-anchor="middle" font-size="13">Notifications</text>
+            <rect id="ms-fill-3" x="362" y="160" width="96" height="0" fill="#c45a4e" opacity="0.4"/>
+
+            <rect x="500" y="80" width="100" height="80" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+            <text x="550" y="125" text-anchor="middle" font-size="13">Billing</text>
+            <rect id="ms-fill-4" x="502" y="160" width="96" height="0" fill="#c45a4e" opacity="0.4"/>
+          </g>
+        </g>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const controls = el("div", { class: "controls" });
+    const slider = el("input", { type: "range", min: "0", max: "100", value: "10", style: { width: "240px" } });
+    const readout = el("span", { class: "readout" }, "10");
+    let isMicro = false;
+    const toggleBtn = el("button", {
+      onclick: () => {
+        isMicro = !isMicro;
+        stage.querySelector("#mono-view").style.display = isMicro ? "none" : "";
+        stage.querySelector("#micro-view").style.display = isMicro ? "" : "none";
+        toggleBtn.textContent = isMicro ? "Back to monolith" : "Split it up";
+        update();
+      }
+    }, "Split it up");
+
+    function update() {
+      const v = parseInt(slider.value, 10);
+      readout.textContent = String(v);
+      // The monolith fills up uniformly with load (everything slows down).
+      // Microservices: the "Tasks" one fills up but the others stay calm,
+      // because we modeled the load as a tasks-heavy workload.
+      const fill = (v / 100) * 160;
+      const fillEl = stage.querySelector("#mono-fill");
+      if (fillEl) {
+        fillEl.setAttribute("height", String(fill));
+        fillEl.setAttribute("y", String(200 - fill));
+      }
+      // Micro: only Tasks gets red.
+      const tasksFill = (v / 100) * 80;
+      const f2 = stage.querySelector("#ms-fill-2");
+      if (f2) {
+        f2.setAttribute("height", String(tasksFill));
+        f2.setAttribute("y", String(160 - tasksFill));
+      }
+      // Other services stay cool
+      ["#ms-fill-1", "#ms-fill-3", "#ms-fill-4"].forEach(id => {
+        const e = stage.querySelector(id);
+        if (e) { e.setAttribute("height", String((v / 400) * 20)); e.setAttribute("y", String(160 - (v / 400) * 20)); }
+      });
+    }
+    slider.addEventListener("input", update);
+    update();
+    controls.appendChild(el("label", {}, "User load:"));
+    controls.appendChild(slider);
+    controls.appendChild(readout);
+    controls.appendChild(toggleBtn);
+    root.appendChild(controls);
+
+    root.appendChild(el("p", { html:
+      "<b>The point:</b> In the monolith, heavy task traffic blocks <em>everything</em> — login, billing, search. " +
+      "Split into separate services, the slow part stays contained. You can scale Tasks up without touching the others. " +
+      "This is the whole pitch for microservices."
+    }));
+    root.appendChild(el("div", { class: "tip", html:
+      "<strong>Caveat:</strong> microservices add complexity (more moving parts, network calls, deployments). " +
+      "Worth it when you're big enough that the isolation pays off. Overkill for a weekend project."
+    }));
+  },
+});
+
+// SCENE 3: THE JOURNEY OF A REQUEST ────────────────────────────────────────
+defineScene({
+  title: "The journey of a click",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "3 — Anatomy of a request"));
+    root.appendChild(el("h1", {}, "Where does my click go?"));
+    root.appendChild(el("p", { html:
+      "When you tap <b>Log in</b>, your browser packages your credentials into an HTTP request and sends it. " +
+      "Click <b>Send the request</b> to watch it travel through the layers."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#9aa8b2"/>
+          </marker>
+        </defs>
+        ${["You (browser)", "NGINX Ingress", "API Gateway", "user-service", "PostgreSQL"].map((label, i) => {
+          const x = 30 + i * 145;
+          return `
+            <g class="hop" data-i="${i}">
+              <rect x="${x}" y="80" width="120" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+              <text x="${x + 60}" y="115" text-anchor="middle" font-family="Inter" font-size="13" font-weight="500">${label}</text>
+            </g>
+          `;
+        }).join("")}
+        ${[0,1,2,3].map(i => {
+          const x1 = 30 + i * 145 + 120, x2 = 30 + (i+1) * 145;
+          return `<line x1="${x1+2}" y1="110" x2="${x2-4}" y2="110" stroke="#9aa8b2" stroke-width="2" marker-end="url(#arrow-a)"/>`;
+        }).join("")}
+        <circle id="packet" cx="90" cy="110" r="7" fill="#e07b3a" opacity="0"/>
+        <text id="hop-label" x="375" y="180" text-anchor="middle" font-family="Inter" font-size="13" fill="#6b7878"></text>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const annotations = [
+      "Your browser holds an HTTP request: POST /api/v1/auth/login with your email and password (over HTTPS, so encrypted).",
+      "NGINX is the front door of the cluster. It terminates TLS and routes /api/* to the gateway.",
+      "The gateway checks rate limits and CORS, then forwards the request to the right backend — user-service handles /auth/*.",
+      "user-service finds your account in PostgreSQL. The password isn't compared directly — bcrypt hashes the one you sent and compares hashes.",
+      "PostgreSQL returns the row. user-service builds a JWT and sends it back. The same packet retraces its steps to your browser.",
+    ];
+
+    const controls = el("div", { class: "controls" });
+    const sendBtn = el("button", {
+      onclick: async () => {
+        sendBtn.disabled = true;
+        const packet = stage.querySelector("#packet");
+        const label = stage.querySelector("#hop-label");
+        const positions = [90, 235, 380, 525, 670];
+        for (let i = 0; i < positions.length; i++) {
+          packet.style.transition = i === 0 ? "none" : "cx 0.7s ease-in-out";
+          packet.setAttribute("cx", String(positions[i]));
+          packet.style.opacity = "1";
+          label.textContent = annotations[i];
+          await wait(900);
+        }
+        label.textContent = "Response retraces the steps back to your browser →";
+        // Reverse trip
+        for (let i = positions.length - 1; i >= 0; i--) {
+          packet.style.transition = "cx 0.4s ease-in-out";
+          packet.setAttribute("cx", String(positions[i]));
+          await wait(500);
+        }
+        packet.style.opacity = "0";
+        label.textContent = "Logged in. The whole round trip: typically under 200 ms.";
+        sendBtn.disabled = false;
+      }
+    }, "▶ Send the request");
+    controls.appendChild(sendBtn);
+    root.appendChild(controls);
+  },
+});
+
+// SCENE 4: THE API GATEWAY ─────────────────────────────────────────────────
+defineScene({
+  title: "The doorman: API gateway",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "4 — The gateway"));
+    root.appendChild(el("h1", {}, "One door, many rooms"));
+    root.appendChild(el("p", { html:
+      "All requests come through one place: the <b>API gateway</b>. Why? It does the cross-cutting jobs that every request needs: " +
+      "check who you are, make sure you're not flooding us, log the request, route it to the right service."
+    }));
+    root.appendChild(el("p", { html:
+      "Click the buttons below — each one sends a different kind of request. Watch the gateway route it."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg">
+        <!-- User -->
+        <g transform="translate(40, 130)">
+          <circle r="20" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+          <text y="5" text-anchor="middle" font-size="20">👤</text>
+          <text y="40" text-anchor="middle" font-size="11" fill="#6b7878">you</text>
+        </g>
+        <!-- Gateway -->
+        <g transform="translate(280, 100)">
+          <rect width="120" height="80" rx="10" fill="#2c7a87" stroke="#2c7a87"/>
+          <text x="60" y="32" text-anchor="middle" fill="#fff" font-weight="600">API Gateway</text>
+          <text x="60" y="52" text-anchor="middle" fill="#fff" font-size="11" opacity="0.85">auth · rate-limit · route</text>
+        </g>
+        <!-- Three backends -->
+        <g transform="translate(540, 30)">
+          <rect width="140" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="svc-user"/>
+          <text x="70" y="36" text-anchor="middle" font-family="Inter" font-weight="500">user-service</text>
+        </g>
+        <g transform="translate(540, 130)">
+          <rect width="140" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="svc-task"/>
+          <text x="70" y="36" text-anchor="middle" font-family="Inter" font-weight="500">task-service</text>
+        </g>
+        <g transform="translate(540, 230)">
+          <rect width="140" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="svc-notif"/>
+          <text x="70" y="36" text-anchor="middle" font-family="Inter" font-weight="500">notification-service</text>
+        </g>
+        <!-- Lines from user → gateway → backends -->
+        <line x1="62" y1="140" x2="278" y2="140" stroke="#9aa8b2" stroke-width="2"/>
+        <line x1="400" y1="125" x2="538" y2="60"  stroke="#d8cdb8" stroke-width="2"/>
+        <line x1="400" y1="140" x2="538" y2="160" stroke="#d8cdb8" stroke-width="2"/>
+        <line x1="400" y1="155" x2="538" y2="260" stroke="#d8cdb8" stroke-width="2"/>
+        <!-- Envelope packet -->
+        <g id="env" opacity="0">
+          <rect x="-10" y="-7" width="20" height="14" rx="2" fill="#e07b3a"/>
+          <line x1="-10" y1="-7" x2="0" y2="0" stroke="#fff" stroke-width="1"/>
+          <line x1="10"  y1="-7" x2="0" y2="0" stroke="#fff" stroke-width="1"/>
+        </g>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const desc = el("p", { html: "<em>Pick a request to send.</em>" });
+
+    const routes = [
+      { label: "POST /api/v1/auth/login",      target: "user", text: "Auth lives in user-service. Gateway forwards. No token needed yet — login is exempt." },
+      { label: "GET /api/v1/tasks/",           target: "task", text: "Gateway checks your JWT, sees you're authenticated, forwards to task-service with your user id signed into the headers." },
+      { label: "GET /api/v1/notifications/stream", target: "notif", text: "An SSE stream. Gateway keeps the connection open and pipes events through. Long-lived." },
+      { label: "POST /api/v1/users/me",        target: "user", text: "Profile updates. Gateway checks your token, then user-service handles the write." },
+    ];
+
+    const controls = el("div", { class: "controls" });
+    for (const r of routes) {
+      controls.appendChild(el("button", {
+        class: "ghost",
+        onclick: async () => {
+          desc.innerHTML = `<span class="mono">${r.label}</span><br>${r.text}`;
+          const env = stage.querySelector("#env");
+          const targetY = { user: 60, task: 160, notif: 260 }[r.target];
+          // user → gateway
+          env.style.transition = "none";
+          env.setAttribute("transform", "translate(62, 140)");
+          env.style.opacity = "1";
+          await wait(40);
+          env.style.transition = "transform 0.7s ease-in-out";
+          env.setAttribute("transform", "translate(340, 140)");
+          await wait(800);
+          // gateway → backend
+          env.setAttribute("transform", `translate(610, ${targetY})`);
+          await wait(800);
+          // backend flash
+          const box = stage.querySelector(`#svc-${r.target}`);
+          box.setAttribute("fill", "#f3ead9");
+          await wait(300);
+          box.setAttribute("fill", "#fff");
+          env.style.opacity = "0";
+        }
+      }, r.label));
+    }
+
+    root.appendChild(desc);
+    root.appendChild(controls);
+
+    root.appendChild(el("p", { html:
+      "<b>Why this matters:</b> If every service had to implement auth and rate limiting itself, you'd have four copies of " +
+      "the same code and four chances to get it wrong. Centralizing those cross-cutting concerns at the gateway is one of " +
+      "the biggest wins of the pattern."
+    }));
+  },
+});
+
+// SCENE 5: JWT ─────────────────────────────────────────────────────────────
+defineScene({
+  title: "Your magic ticket: JWT",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "5 — Authentication"));
+    root.appendChild(el("h1", {}, "How the server knows it's you"));
+    root.appendChild(el("p", { html:
+      "After you log in, the server gives you a string. You include that string on every future request. " +
+      "It's called a <b>JWT</b> — JSON Web Token. It's three pieces, separated by dots:"
+    }));
+
+    const jwtSample = "eyJhbGciOiJIUzI1NiIsImtpZCI6ImsxIn0.eyJzdWIiOiJhbGljZSIsImVtYWlsIjoiYUBiLmNvbSIsInJvbGVzIjpbInVzZXIiXSwiZXhwIjoxNzMwMDAwMDAwfQ.AbCd3F4xPzQrSt6vWxYZ-1_meaningful_signature_bytes";
+    const [hdr, pay, sig] = jwtSample.split(".");
+
+    const stage = el("div", { class: "stage" });
+    stage.appendChild(el("div", {
+      style: { fontFamily: "JetBrains Mono, monospace", fontSize: "13px", wordBreak: "break-all",
+               background: "var(--paper)", padding: "12px", borderRadius: "6px", border: "1px solid var(--line)" }
+    },
+      el("span", { id: "jwt-h", style: { color: "var(--accent)", cursor: "pointer" } }, hdr),
+      ".",
+      el("span", { id: "jwt-p", style: { color: "var(--warm)", cursor: "pointer" } }, pay),
+      ".",
+      el("span", { id: "jwt-s", style: { color: "var(--good)", cursor: "pointer" } }, sig)
+    ));
+    const detail = el("div", { class: "tip", html: "<strong>Click any colored chunk above</strong> to expand it." });
+    stage.appendChild(detail);
+    root.appendChild(stage);
+
+    const explanations = {
+      h: `<strong>Header</strong> (the metadata): <code>{ "alg": "HS256", "kid": "k1" }</code><br>
+          <code>alg</code> is the signing algorithm. <code>kid</code> is which secret key the server used —
+          the platform supports rotating keys, so multiple keys can be valid at once.`,
+      p: `<strong>Payload</strong> (the claims): <code>{ "sub": "alice", "email": "a@b.com", "roles": ["user"], "exp": ... }</code><br>
+          The actual identity info. <code>sub</code> is the user id. <code>exp</code> is when the token expires (an hour from issue).
+          This part is just base64 — anyone can read it. <em>Do not put secrets here.</em>`,
+      s: `<strong>Signature</strong> (the proof): an HMAC over the header + payload, computed with a secret only the server knows.<br>
+          You can't forge it without the secret. If you tamper with the header or payload, the signature stops matching.
+          The gateway verifies this on every request.`,
+    };
+    stage.querySelector("#jwt-h").onclick = () => detail.innerHTML = explanations.h;
+    stage.querySelector("#jwt-p").onclick = () => detail.innerHTML = explanations.p;
+    stage.querySelector("#jwt-s").onclick = () => detail.innerHTML = explanations.s;
+
+    root.appendChild(el("p", { html:
+      "<b>Stateless</b> is the magic word. The server doesn't store your session anywhere — every request carries everything " +
+      "needed to verify you. That's why microservices can scale horizontally: no service has to ask a central session store " +
+      "'is this person logged in?'"
+    }));
+    root.appendChild(el("p", { html:
+      "But if someone steals a JWT, they can impersonate you until it expires. That's why we keep them short-lived (one hour) " +
+      "and use a separate, revocable <em>refresh token</em> to get new ones — covered in a later scene."
+    }));
+  },
+});
+
+// SCENE 6: PASSWORDS / BCRYPT ──────────────────────────────────────────────
+defineScene({
+  title: "Don't store passwords",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "6 — Hashing"));
+    root.appendChild(el("h1", {}, "How to keep passwords safe"));
+    root.appendChild(el("p", { html:
+      "Rule one of building a login system: <b>never save your users' passwords</b>. Save a one-way scramble. " +
+      "Even the people running the server can't read it back. If hackers steal the database, they get hashes, not passwords."
+    }));
+    root.appendChild(el("p", { html:
+      "The platform uses <b>bcrypt</b> — a hash function deliberately designed to be <em>slow</em>. " +
+      "Slow means brute-forcing it is impractical. Type a password below and watch what happens."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    const input = el("input", { type: "text", placeholder: "Type a password", value: "hunter2",
+      style: { width: "100%", padding: "10px", fontSize: "16px", fontFamily: "JetBrains Mono, monospace",
+               border: "1px solid var(--line)", borderRadius: "6px", background: "var(--paper)" }
+    });
+    stage.appendChild(input);
+    const flow = el("div", { style: { marginTop: "16px", fontFamily: "JetBrains Mono, monospace", fontSize: "13px" } });
+    stage.appendChild(flow);
+    root.appendChild(stage);
+
+    // Fake bcrypt: hash the password by mixing into a fixed-shape output.
+    // This is purely visual — we are NOT computing real bcrypt in the browser.
+    function fakeBcrypt(pw) {
+      let h = 0;
+      for (const c of pw) h = ((h << 5) - h + c.charCodeAt(0)) | 0;
+      const salt = "Yt9KqL2sR8xV1m";
+      const body = (Math.abs(h).toString(16).padStart(22, "x") + salt + pw.length).slice(0, 31);
+      return `$2b$12$${salt}${body}`;
+    }
+    function update() {
+      const pw = input.value || "(empty)";
+      flow.innerHTML = `
+        <div style="margin: 12px 0; color: var(--muted);">1. Plain password (NEVER saved):</div>
+        <div style="background: #fff5e6; padding: 6px 10px; border-radius: 4px;">${escapeHtml(pw)}</div>
+        <div style="margin: 12px 0; color: var(--muted);">2. Add a random salt + run 12 rounds of bcrypt (slow on purpose):</div>
+        <div style="background: #f3ead9; padding: 6px 10px; border-radius: 4px; word-break: break-all;">${fakeBcrypt(pw)}</div>
+        <div style="margin: 12px 0; color: var(--muted);">3. Store ONLY the hash. The plain password is discarded.</div>
+      `;
+    }
+    input.addEventListener("input", update);
+    update();
+
+    root.appendChild(el("p", { html:
+      "<b>Why the salt?</b> Without it, two users with the same password would have the same hash — and an attacker " +
+      "could precompute hashes for common passwords (a 'rainbow table') and look yours up. The salt is random per user, " +
+      "so even identical passwords get different hashes."
+    }));
+    root.appendChild(el("p", { html:
+      "<b>Why slow?</b> A login takes ~250 ms. That's annoying for an attacker trying a billion guesses. " +
+      "It's fine for a human typing once."
+    }));
+    function escapeHtml(s) {
+      return String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    }
+  },
+});
+
+// SCENE 7: RATE LIMITING ───────────────────────────────────────────────────
+defineScene({
+  title: "Slowing the firehose",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "7 — Rate limiting"));
+    root.appendChild(el("h1", {}, "What if someone hits us a million times?"));
+    root.appendChild(el("p", { html:
+      "Without limits, anyone could melt the server. Real apps put a ceiling on requests per second per user. " +
+      "Cross the line, and the server returns a polite '429 Too Many Requests' instead of doing the work."
+    }));
+    root.appendChild(el("p", { html:
+      "Drag the dial. Watch what happens when you push past the limit."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 700 240" xmlns="http://www.w3.org/2000/svg">
+        <!-- Bucket -->
+        <g transform="translate(280, 30)">
+          <path d="M 0,20 L 140,20 L 130,170 L 10,170 Z" fill="#fff" stroke="#2c7a87" stroke-width="2"/>
+          <text x="70" y="14" text-anchor="middle" font-size="11" fill="#6b7878">budget: 100/min</text>
+          <rect id="bucket-fill" x="2" y="170" width="136" height="0" fill="#2c7a87" opacity="0.5"/>
+          <line x1="-10" y1="22" x2="150" y2="22" stroke="#c45a4e" stroke-width="2" stroke-dasharray="4,3"/>
+          <text x="155" y="26" font-size="11" fill="#c45a4e">limit</text>
+        </g>
+        <text id="status-pill" x="350" y="220" text-anchor="middle" font-family="Inter" font-size="14"></text>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const controls = el("div", { class: "controls" });
+    const slider = el("input", { type: "range", min: "10", max: "300", value: "60", style: { width: "240px" } });
+    const readout = el("span", { class: "readout" }, "60");
+    controls.appendChild(el("label", {}, "Requests/min:"));
+    controls.appendChild(slider);
+    controls.appendChild(readout);
+    root.appendChild(controls);
+
+    function update() {
+      const v = parseInt(slider.value, 10);
+      readout.textContent = String(v);
+      const pct = Math.min(1, v / 100);
+      const h = pct * 148;
+      const fill = stage.querySelector("#bucket-fill");
+      fill.setAttribute("height", String(h));
+      fill.setAttribute("y", String(170 - h));
+      fill.setAttribute("fill", v > 100 ? "#c45a4e" : "#2c7a87");
+      const status = stage.querySelector("#status-pill");
+      if (v <= 100) {
+        status.textContent = "Under the limit — all requests succeed.";
+        status.setAttribute("fill", "#4a9d6a");
+      } else {
+        status.textContent = `Over the limit. ${v - 100} of ${v} requests return 429.`;
+        status.setAttribute("fill", "#c45a4e");
+      }
+    }
+    slider.addEventListener("input", update);
+    update();
+
+    root.appendChild(el("p", { html:
+      "<b>Two buckets, not one.</b> This platform uses both <em>per-IP</em> and <em>per-user</em> limits. Why? " +
+      "If 50 coworkers share one office's public IP, they share one bucket. If one of them runs a noisy script, " +
+      "the others get rate-limited too — unfair. The per-user budget gives each logged-in person their own quota."
+    }));
+    root.appendChild(el("div", { class: "tip", html:
+      "<strong>Real-world detail:</strong> the limit lives in Redis, not the gateway's memory. With multiple gateway " +
+      "replicas behind a load balancer, a shared store means the limit is enforced globally, not per replica."
+    }));
+  },
+});
+
+// SCENE 8: CIRCUIT BREAKER ─────────────────────────────────────────────────
+defineScene({
+  title: "When a service goes down",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "8 — Resilience"));
+    root.appendChild(el("h1", {}, "Don't keep knocking on a broken door"));
+    root.appendChild(el("p", { html:
+      "Imagine user-service crashes. The gateway, not knowing, keeps sending requests. Each one waits 30 seconds for a " +
+      "reply that never comes. Soon the gateway has hundreds of threads stuck waiting — and now <em>the gateway</em> is " +
+      "down too. The failure cascaded."
+    }));
+    root.appendChild(el("p", { html:
+      "A <b>circuit breaker</b> stops the cascade. After a few consecutive failures, it 'trips' — and immediately " +
+      "rejects further requests without even trying. Faster failure, healthier rest of the system."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+        <g transform="translate(80, 70)">
+          <rect width="120" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+          <text x="60" y="35" text-anchor="middle" font-weight="500">Gateway</text>
+        </g>
+        <g id="breaker" transform="translate(300, 60)">
+          <circle cx="60" cy="40" r="42" fill="#fff" stroke="#4a9d6a" stroke-width="3" id="cb-circle"/>
+          <text x="60" y="44" text-anchor="middle" font-family="Lora" font-weight="600" font-size="16" id="cb-state">CLOSED</text>
+          <text x="60" y="100" text-anchor="middle" font-size="11" fill="#6b7878">circuit breaker</text>
+        </g>
+        <g transform="translate(540, 70)">
+          <rect width="120" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="svc"/>
+          <text x="60" y="35" text-anchor="middle" font-weight="500" id="svc-label">user-service</text>
+        </g>
+        <line x1="202" y1="100" x2="298" y2="100" stroke="#9aa8b2" stroke-width="2"/>
+        <line x1="382" y1="100" x2="538" y2="100" stroke="#9aa8b2" stroke-width="2" id="cb-line"/>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    let failures = 0;
+    let state = "CLOSED"; // CLOSED, OPEN, HALF_OPEN
+    let openSince = 0;
+    const log = el("div", { class: "tip", html:
+      "<strong>Status: </strong>healthy. Send some requests to see the breaker stay closed."
+    });
+    root.appendChild(log);
+
+    function setState(s) {
+      state = s;
+      const circle = stage.querySelector("#cb-circle");
+      const text = stage.querySelector("#cb-state");
+      const line = stage.querySelector("#cb-line");
+      text.textContent = s.replace("_", "-");
+      if (s === "CLOSED") {
+        circle.setAttribute("stroke", "#4a9d6a");
+        line.setAttribute("stroke", "#9aa8b2");
+        line.setAttribute("stroke-dasharray", "0");
+      } else if (s === "OPEN") {
+        circle.setAttribute("stroke", "#c45a4e");
+        line.setAttribute("stroke", "#c45a4e");
+        line.setAttribute("stroke-dasharray", "4 4");
+      } else {
+        circle.setAttribute("stroke", "#e07b3a");
+        line.setAttribute("stroke", "#e07b3a");
+        line.setAttribute("stroke-dasharray", "0");
+      }
+    }
+
+    const ctl = el("div", { class: "controls" });
+    let serviceHealthy = true;
+    const fail = el("button", { class: "warm", onclick: () => {
+        serviceHealthy = !serviceHealthy;
+        const svc = stage.querySelector("#svc");
+        const lbl = stage.querySelector("#svc-label");
+        svc.setAttribute("fill", serviceHealthy ? "#fff" : "#fdebe8");
+        svc.setAttribute("stroke", serviceHealthy ? "#d8cdb8" : "#c45a4e");
+        lbl.textContent = serviceHealthy ? "user-service" : "user-service ✗";
+        fail.textContent = serviceHealthy ? "Kill user-service" : "Restart user-service";
+      }
+    }, "Kill user-service");
+
+    const send = el("button", { onclick: async () => {
+      // simulate request
+      if (state === "OPEN") {
+        const sinceOpen = Date.now() - openSince;
+        if (sinceOpen > 4000) {
+          setState("HALF_OPEN");
+          log.innerHTML = "<strong>Probe:</strong> breaker has been open for a while. Allowing one trial request.";
+        } else {
+          log.innerHTML = `<strong>Failed fast.</strong> Breaker is OPEN — request rejected without hitting user-service. ` +
+                          `<em>Cooling for ${Math.ceil((4000 - sinceOpen) / 1000)}s more.</em>`;
+          return;
+        }
+      }
+      if (!serviceHealthy) {
+        failures++;
+        log.innerHTML = `<strong>Failure ${failures}/3.</strong> Service didn't respond.`;
+        if (failures >= 3) {
+          setState("OPEN");
+          openSince = Date.now();
+          log.innerHTML += " <strong>→ Breaker tripped.</strong> Future requests fail instantly.";
+        }
+      } else {
+        if (state === "HALF_OPEN") {
+          failures = 0;
+          setState("CLOSED");
+          log.innerHTML = "<strong>Probe succeeded.</strong> Breaker closed. Back to normal.";
+        } else {
+          failures = 0;
+          log.innerHTML = "<strong>Success.</strong> Request completed.";
+        }
+      }
+    } }, "Send a request");
+
+    ctl.appendChild(send);
+    ctl.appendChild(fail);
+    root.appendChild(ctl);
+
+    root.appendChild(el("p", { html:
+      "<b>Three states:</b> closed (normal), open (failing fast), half-open (testing whether the downstream is back). " +
+      "It's a vaccination against the most common cause of large outages: a small failure that snowballs because no one " +
+      "told the upstream callers to stop."
+    }));
+  },
+});
+
+// SCENE 9: PUB/SUB EVENTS ──────────────────────────────────────────────────
+defineScene({
+  title: "Letting go: events",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "9 — Async communication"));
+    root.appendChild(el("h1", {}, "When services talk without talking"));
+    root.appendChild(el("p", { html:
+      "When you create a task, the notification service needs to know — so it can email the assignee. " +
+      "But task-service shouldn't <em>have to know</em> notification-service exists. Tomorrow we might add an analytics service " +
+      "that also wants to hear about new tasks. We don't want to edit task-service for every new listener."
+    }));
+    root.appendChild(el("p", { html:
+      "The pattern: task-service <b>publishes</b> an event ('task.created') to a topic. Anyone interested " +
+      "<b>subscribes</b>. Loose coupling. Click the button below to publish."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 240" xmlns="http://www.w3.org/2000/svg">
+        <g transform="translate(40, 90)">
+          <rect width="130" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+          <text x="65" y="36" text-anchor="middle" font-weight="500">task-service</text>
+          <text x="65" y="75" text-anchor="middle" font-size="11" fill="#6b7878">publisher</text>
+        </g>
+        <g transform="translate(280, 60)">
+          <ellipse cx="80" cy="60" rx="80" ry="50" fill="#f3ead9" stroke="#2c7a87" stroke-width="2"/>
+          <text x="80" y="55" text-anchor="middle" font-family="Lora" font-weight="600">Topic</text>
+          <text x="80" y="75" text-anchor="middle" font-size="12">"task.created"</text>
+          <text x="80" y="130" text-anchor="middle" font-size="11" fill="#6b7878">Azure Service Bus</text>
+        </g>
+        <g transform="translate(540, 30)">
+          <rect width="150" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+          <text x="75" y="36" text-anchor="middle" font-weight="500">notification-service</text>
+          <text x="75" y="76" text-anchor="middle" font-size="11" fill="#6b7878">subscriber</text>
+        </g>
+        <g transform="translate(540, 130)">
+          <rect width="150" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2" stroke-dasharray="4 3"/>
+          <text x="75" y="32" text-anchor="middle" font-weight="500">analytics-service</text>
+          <text x="75" y="50" text-anchor="middle" font-size="11" fill="#6b7878">(future)</text>
+        </g>
+        <line x1="170" y1="120" x2="280" y2="120" stroke="#9aa8b2" stroke-width="2"/>
+        <line x1="440" y1="100" x2="540" y2="60"  stroke="#9aa8b2" stroke-width="2" stroke-dasharray="3 3"/>
+        <line x1="440" y1="120" x2="540" y2="160" stroke="#9aa8b2" stroke-width="2" stroke-dasharray="3 3"/>
+        <circle id="evt" r="9" cx="105" cy="120" fill="#e07b3a" opacity="0"/>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const ctl = el("div", { class: "controls" });
+    const log = el("div", { class: "tip", html: "<strong>Tip:</strong> click the button to publish a 'task.created' event." });
+    ctl.appendChild(el("button", { onclick: async () => {
+      const e = stage.querySelector("#evt");
+      e.setAttribute("cx", "105"); e.setAttribute("cy", "120");
+      e.style.opacity = "1"; e.style.transition = "none";
+      await wait(40);
+      e.style.transition = "all 0.7s ease-in-out";
+      e.setAttribute("cx", "360"); e.setAttribute("cy", "120");
+      log.innerHTML = "<strong>Step 1:</strong> task-service publishes the event to the topic.";
+      await wait(800);
+      // fan out
+      const e2 = e.cloneNode();
+      stage.querySelector("svg").appendChild(e2);
+      e.style.transition = "all 0.7s ease-in-out";
+      e2.style.transition = "all 0.7s ease-in-out";
+      e.setAttribute("cx", "615"); e.setAttribute("cy", "60");
+      e2.setAttribute("cx", "615"); e2.setAttribute("cy", "160");
+      log.innerHTML = "<strong>Step 2:</strong> Service Bus fans the event out to every subscriber.";
+      await wait(900);
+      log.innerHTML = "<strong>Step 3:</strong> each subscriber processes it independently. task-service didn't need to know who was listening.";
+      await wait(800);
+      e.style.opacity = "0";
+      e2.style.opacity = "0";
+      await wait(400);
+      e2.remove();
+    } }, "▶ Publish event"));
+    root.appendChild(log);
+    root.appendChild(ctl);
+
+    root.appendChild(el("p", { html:
+      "Service Bus also <b>persists</b> events. If notification-service is down for an hour, events queue up; when it comes back, " +
+      "it catches up. The publisher doesn't pause or fail."
+    }));
+  },
+});
+
+// SCENE 10: KUBERNETES + HPA ───────────────────────────────────────────────
+defineScene({
+  title: "Kubernetes: many copies",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "10 — Kubernetes"));
+    root.appendChild(el("h1", {}, "Many copies, automatically"));
+    root.appendChild(el("p", { html:
+      "In production we don't run <em>one</em> of each service — we run several. If one crashes, traffic shifts to the others. " +
+      "If load goes up, we add more. <b>Kubernetes</b> is the system that runs the copies (called 'pods') and adjusts their count."
+    }));
+    root.appendChild(el("p", { html:
+      "Slide the load dial. Watch the autoscaler add and remove pods."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+        <text x="360" y="22" text-anchor="middle" font-family="Lora" font-weight="600" font-size="14">api-gateway pods</text>
+        <g id="pods"></g>
+        <text id="hpa-status" x="360" y="200" text-anchor="middle" font-size="12" fill="#6b7878"></text>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const podsGrp = stage.querySelector("#pods");
+    function renderPods(count) {
+      podsGrp.innerHTML = "";
+      const total = Math.max(2, Math.min(10, count));
+      const w = 60, gap = 10;
+      const totalW = total * w + (total - 1) * gap;
+      const x0 = (720 - totalW) / 2;
+      for (let i = 0; i < total; i++) {
+        const x = x0 + i * (w + gap);
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("transform", `translate(${x}, 60)`);
+        g.style.transition = "opacity 0.4s";
+        g.style.opacity = "0";
+        setTimeout(() => g.style.opacity = "1", 40);
+        const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        r.setAttribute("width", w); r.setAttribute("height", 90);
+        r.setAttribute("rx", 6); r.setAttribute("fill", "#fff");
+        r.setAttribute("stroke", "#2c7a87"); r.setAttribute("stroke-width", 2);
+        g.appendChild(r);
+        const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        t.setAttribute("x", w/2); t.setAttribute("y", 50);
+        t.setAttribute("text-anchor", "middle"); t.setAttribute("font-size", "11");
+        t.textContent = `pod-${i + 1}`;
+        g.appendChild(t);
+        // load fill
+        const load = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        load.setAttribute("x", 4); load.setAttribute("y", 70);
+        load.setAttribute("width", w - 8); load.setAttribute("height", 14);
+        load.setAttribute("fill", "#2c7a87"); load.setAttribute("opacity", "0.3"); load.setAttribute("rx", 2);
+        g.appendChild(load);
+        podsGrp.appendChild(g);
+      }
+    }
+
+    const slider = el("input", { type: "range", min: "10", max: "100", value: "20", style: { width: "240px" } });
+    const readout = el("span", { class: "readout" }, "20");
+    function update() {
+      const load = parseInt(slider.value, 10);
+      readout.textContent = String(load);
+      // HPA rule: target 50% load per pod. So pods = load * 2 / 100, clamped 2..10.
+      const target = Math.max(2, Math.min(10, Math.round(load / 50 * 2 + 2 - 0.5)));
+      renderPods(target);
+      stage.querySelector("#hpa-status").textContent = `HPA: target 50% CPU; load=${load}% → ${target} pods`;
+    }
+    slider.addEventListener("input", update);
+    update();
+
+    const ctl = el("div", { class: "controls" });
+    ctl.appendChild(el("label", {}, "Cluster CPU load %:"));
+    ctl.appendChild(slider);
+    ctl.appendChild(readout);
+    root.appendChild(ctl);
+
+    root.appendChild(el("p", { html:
+      "<b>Three guarantees</b> Kubernetes gives you: (1) the right <em>number</em> of pods are running, (2) traffic gets " +
+      "balanced across them, (3) if one dies, a replacement is started in seconds. You declare 'I want 2-10 pods, scale on CPU,' " +
+      "and the platform handles the rest."
+    }));
+  },
+});
+
+// SCENE 11: NETWORK POLICIES ──────────────────────────────────────────────
+defineScene({
+  title: "Who can talk to whom",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "11 — Defense in depth"));
+    root.appendChild(el("h1", {}, "Locking the inside doors"));
+    root.appendChild(el("p", { html:
+      "By default in Kubernetes, every pod can talk to every other pod. That's convenient — and dangerous. " +
+      "If an attacker breaks into one pod, they can pivot anywhere."
+    }));
+    root.appendChild(el("p", { html:
+      "<b>Network policies</b> are firewalls inside the cluster. We declare exactly who's allowed to call whom. " +
+      "Toggle them on below."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
+        ${[
+          {x:60,  y:110, l:"NGINX"},
+          {x:220, y:110, l:"gateway"},
+          {x:380, y:30,  l:"user-svc"},
+          {x:380, y:110, l:"task-svc"},
+          {x:380, y:190, l:"notif-svc"},
+          {x:560, y:110, l:"PostgreSQL"},
+        ].map(p => `
+          <g transform="translate(${p.x}, ${p.y})">
+            <rect width="100" height="50" rx="6" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+            <text x="50" y="30" text-anchor="middle" font-size="13">${p.l}</text>
+          </g>
+        `).join("")}
+        <g id="lines"></g>
+        <g id="atk" transform="translate(60, 220)" style="display:none;">
+          <rect width="100" height="50" rx="6" fill="#fdebe8" stroke="#c45a4e" stroke-width="2"/>
+          <text x="50" y="30" text-anchor="middle" font-size="13" fill="#c45a4e">attacker</text>
+        </g>
+        <g id="atk-arrow" transform="translate(160, 240)" style="display:none;">
+          <line x1="0" y1="0" x2="430" y2="-100" stroke="#c45a4e" stroke-width="2" stroke-dasharray="4 3"/>
+          <text id="atk-status" x="220" y="-60" text-anchor="middle" font-size="13" fill="#c45a4e"></text>
+        </g>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const linesGrp = stage.querySelector("#lines");
+    function setupLines(restricted) {
+      linesGrp.innerHTML = "";
+      // Allowed: NGINX→gateway, gateway→{user,task,notif}, {user,task}→PostgreSQL
+      const allowed = [
+        [160, 135, 220, 135],
+        [320, 135, 380, 55],
+        [320, 135, 380, 135],
+        [320, 135, 380, 215],
+        [480, 55,  560, 135],
+        [480, 135, 560, 135],
+      ];
+      // Disallowed extras shown only when restricted=false (show all-to-all chaos)
+      const extras = [
+        [320, 135, 480, 215], // gateway can talk to notif-svc — actually that IS allowed
+        [380, 55, 480, 135],  // user → task
+        [380, 215, 560, 135], // notif → postgres (NOT allowed; only in unrestricted)
+        [60, 135, 380, 55],   // nginx → user-svc directly (skip gateway; not allowed)
+      ];
+      const draw = (x1, y1, x2, y2, color) => {
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+        line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+        line.setAttribute("stroke", color); line.setAttribute("stroke-width", 2);
+        linesGrp.appendChild(line);
+      };
+      allowed.forEach(([a,b,c,d]) => draw(a,b,c,d,"#9aa8b2"));
+      if (!restricted) {
+        extras.forEach(([a,b,c,d]) => draw(a,b,c,d,"#c45a4e"));
+      }
+    }
+    setupLines(false);
+
+    const ctl = el("div", { class: "controls" });
+    let restricted = false;
+    ctl.appendChild(el("button", { onclick: () => {
+      restricted = !restricted;
+      setupLines(restricted);
+    }}, "Toggle network policies"));
+    ctl.appendChild(el("button", { class: "warm", onclick: () => {
+      stage.querySelector("#atk").style.display = "";
+      stage.querySelector("#atk-arrow").style.display = "";
+      const s = stage.querySelector("#atk-status");
+      if (restricted) {
+        s.textContent = "BLOCKED by network policy ✕";
+      } else {
+        s.textContent = "Reached the database!";
+      }
+    }}, "Simulate attacker"));
+    root.appendChild(ctl);
+
+    root.appendChild(el("p", { html:
+      "<b>The rule:</b> default deny, allow only what's needed. NGINX may only talk to the gateway. The gateway may talk " +
+      "to the three services. Only user-service and task-service may reach Postgres. notification-service has no business " +
+      "with the database, so it's blocked."
+    }));
+  },
+});
+
+// SCENE 12: HMAC INTER-SERVICE IDENTITY ────────────────────────────────────
+defineScene({
+  title: "Signing identity between services",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "12 — Defense in depth, deeper"));
+    root.appendChild(el("h1", {}, "What if someone bypasses the gateway?"));
+    root.appendChild(el("p", { html:
+      "Network policies protect the inside. But software has bugs and people make typos. What if, somehow, an attacker " +
+      "gets inside the cluster and sends a direct request to user-service with <code>X-User-Id: alice</code>? " +
+      "Would user-service trust it?"
+    }));
+    root.appendChild(el("p", { html:
+      "Yes — unless we make the gateway <b>sign</b> the identity headers with a secret only the backends know. " +
+      "An attacker who can reach user-service but doesn't have the secret can't forge a valid signature."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+        <g transform="translate(40, 70)">
+          <rect width="110" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+          <text x="55" y="36" text-anchor="middle" font-weight="500">Gateway</text>
+          <text x="55" y="76" text-anchor="middle" font-size="11" fill="#6b7878">has secret</text>
+        </g>
+        <g transform="translate(420, 70)">
+          <rect width="120" height="60" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+          <text x="60" y="36" text-anchor="middle" font-weight="500">user-service</text>
+          <text x="60" y="76" text-anchor="middle" font-size="11" fill="#6b7878">has secret</text>
+        </g>
+        <g transform="translate(40, 180)" style="display:none;" id="atk">
+          <rect width="110" height="40" rx="8" fill="#fdebe8" stroke="#c45a4e" stroke-width="2"/>
+          <text x="55" y="26" text-anchor="middle" fill="#c45a4e" font-size="13">attacker</text>
+        </g>
+        <line x1="150" y1="100" x2="420" y2="100" stroke="#9aa8b2" stroke-width="2"/>
+        <g id="envelope" transform="translate(220, 100)" style="display:none;">
+          <rect x="-50" y="-22" width="100" height="44" rx="4" fill="#fff5e6" stroke="#e07b3a" stroke-width="2"/>
+          <text x="0" y="-6" text-anchor="middle" font-size="11" font-weight="600">X-User-Id: alice</text>
+          <text x="0" y="10" text-anchor="middle" font-size="10" id="sig-label">+ signature</text>
+        </g>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const log = el("div", { class: "tip", html: "<strong>Try both:</strong> a signed request from the gateway, and a forged one from an attacker." });
+    root.appendChild(log);
+
+    const ctl = el("div", { class: "controls" });
+    ctl.appendChild(el("button", { onclick: async () => {
+      stage.querySelector("#atk").style.display = "none";
+      const env = stage.querySelector("#envelope");
+      env.style.display = "";
+      env.setAttribute("transform", "translate(180, 100)");
+      env.style.transition = "none";
+      stage.querySelector("#sig-label").textContent = "+ valid signature ✓";
+      stage.querySelector("#sig-label").setAttribute("fill", "#4a9d6a");
+      await wait(40);
+      env.style.transition = "transform 1.1s ease-in-out";
+      env.setAttribute("transform", "translate(480, 100)");
+      await wait(1100);
+      log.innerHTML = "<strong>Accepted.</strong> The HMAC matches the secret; user-service trusts the identity claim.";
+    } }, "Send (signed by gateway)"));
+    ctl.appendChild(el("button", { class: "warm", onclick: async () => {
+      stage.querySelector("#atk").style.display = "";
+      const env = stage.querySelector("#envelope");
+      env.style.display = "";
+      env.setAttribute("transform", "translate(95, 180)");
+      env.style.transition = "none";
+      stage.querySelector("#sig-label").textContent = "+ forged signature ✗";
+      stage.querySelector("#sig-label").setAttribute("fill", "#c45a4e");
+      await wait(40);
+      env.style.transition = "transform 1.1s ease-in-out";
+      env.setAttribute("transform", "translate(480, 100)");
+      await wait(1100);
+      log.innerHTML = "<strong>Rejected.</strong> The attacker doesn't have the shared secret, so they can't generate a valid HMAC. user-service returns 401.";
+    } }, "Send (attacker, no secret)"));
+    root.appendChild(ctl);
+
+    root.appendChild(el("p", { html:
+      "This is <b>defense in depth</b> in action. NetworkPolicies are the first defense; the HMAC is the second. " +
+      "An attacker has to defeat both. The gateway signs <code>X-User-Id</code>, <code>X-User-Email</code>, <code>X-User-Roles</code>, " +
+      "and a timestamp; the backend verifies before trusting anything in those headers."
+    }));
+  },
+});
+
+// SCENE 13: OBSERVABILITY ─────────────────────────────────────────────────
+defineScene({
+  title: "Following one request through the cluster",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "13 — Observability"));
+    root.appendChild(el("h1", {}, "When something's slow, what's slow?"));
+    root.appendChild(el("p", { html:
+      "Microservices' biggest downside: when a user complains 'it's slow,' the request touched four services and a database. " +
+      "Which one is the culprit?"
+    }));
+    root.appendChild(el("p", { html:
+      "<b>Distributed tracing</b>: every request gets a unique ID. Every service logs how long its piece took, tagged with " +
+      "that ID. You assemble the pieces into a 'waterfall' showing the full timing."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+        <g transform="translate(20, 30)" id="spans">
+          ${[
+            { label: "gateway",      x: 0,   w: 600, c: "#2c7a87", h: 0 },
+            { label: "auth-check",   x: 40,  w: 60,  c: "#4a9d6a", h: 1 },
+            { label: "user-service", x: 110, w: 480, c: "#2c7a87", h: 2 },
+            { label: "postgres SELECT", x: 130, w: 50, c: "#4a9d6a", h: 3 },
+            { label: "bcrypt verify",   x: 200, w: 280, c: "#e07b3a", h: 4, slow: true },
+            { label: "postgres UPDATE", x: 490, w: 60,  c: "#4a9d6a", h: 5 },
+          ].map(s => `
+            <g transform="translate(${s.x}, ${s.h * 22})">
+              <rect width="${s.w}" height="16" rx="2" fill="${s.c}" opacity="0.85"/>
+              <text x="${s.w + 6}" y="13" font-size="11" fill="#2d3a3a">${s.label}${s.slow ? " ← slow" : ""}</text>
+            </g>
+          `).join("")}
+        </g>
+        <line x1="20" y1="155" x2="620" y2="155" stroke="#9aa8b2"/>
+        <text x="20"  y="175" font-size="11" fill="#6b7878">0ms</text>
+        <text x="620" y="175" font-size="11" fill="#6b7878" text-anchor="end">300ms</text>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    root.appendChild(el("p", { html:
+      "Reading the trace: most of the time is bcrypt verifying the password. That's expected — bcrypt is slow on purpose. " +
+      "If it were instead the postgres SELECT that ballooned, you'd know to look at indexes or query plans. " +
+      "Tracing turns 'something's slow' into 'this exact thing is slow.'"
+    }));
+
+    root.appendChild(el("p", { html:
+      "Combined with <b>Prometheus metrics</b> (counters and histograms of every request) and <b>structured logs</b> " +
+      "(every log line tagged with the request ID), you can answer almost any operational question in minutes instead of hours."
+    }));
+  },
+});
+
+// SCENE 14: TERRAFORM / IaC ───────────────────────────────────────────────
+defineScene({
+  title: "Infrastructure from a file",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "14 — Infrastructure as code"));
+    root.appendChild(el("h1", {}, "Click-ops vs. one command"));
+    root.appendChild(el("p", { html:
+      "Before <b>Terraform</b>, you'd log into the Azure portal and click your way through hundreds of forms to set up a " +
+      "production environment. Then you'd cross your fingers that dev matched prod. Then someone would edit something by hand " +
+      "and forget to write it down."
+    }));
+    root.appendChild(el("p", { html:
+      "Terraform: describe what you want in a text file. Run <code>terraform apply</code>. Run it again next year, and you " +
+      "get the same thing. Run it in dev with smaller VMs, in prod with bigger ones, from the same code."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
+        <g transform="translate(20, 20)">
+          <rect width="240" height="220" rx="8" fill="#fff" stroke="#d8cdb8" stroke-width="2"/>
+          <text x="120" y="22" text-anchor="middle" font-family="Lora" font-size="13" fill="#6b7878">main.tf</text>
+          <text font-family="JetBrains Mono" font-size="11" fill="#2d3a3a">
+            <tspan x="14" y="50">resource "azurerm_</tspan>
+            <tspan x="14" y="65">  kubernetes_cluster" {</tspan>
+            <tspan x="14" y="80">  name = "aks-prod"</tspan>
+            <tspan x="14" y="95">  ...</tspan>
+            <tspan x="14" y="110">}</tspan>
+            <tspan x="14" y="135">resource "azurerm_</tspan>
+            <tspan x="14" y="150">  postgresql..." {</tspan>
+            <tspan x="14" y="165">  ...</tspan>
+            <tspan x="14" y="180">}</tspan>
+          </text>
+        </g>
+        <g transform="translate(320, 120)">
+          <text font-family="Inter" font-size="13" fill="#2c7a87" font-weight="600">terraform apply →</text>
+        </g>
+        <g id="azure" transform="translate(490, 30)">
+          ${[
+            ["VNet",        0,   0],
+            ["AKS",        110, 0],
+            ["ACR",         0,  60],
+            ["PostgreSQL", 110, 60],
+            ["Redis",       0, 120],
+            ["KeyVault",   110, 120],
+            ["ServiceBus",  0, 180],
+            ["LogAnalytics", 110, 180],
+          ].map(([name, x, y], i) => `
+            <g class="az" data-i="${i}" opacity="0" transform="translate(${x}, ${y})">
+              <rect width="100" height="40" rx="6" fill="#fff" stroke="#2c7a87" stroke-width="2"/>
+              <text x="50" y="25" text-anchor="middle" font-size="11">${name}</text>
+            </g>
+          `).join("")}
+        </g>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const ctl = el("div", { class: "controls" });
+    ctl.appendChild(el("button", { onclick: async () => {
+      const boxes = stage.querySelectorAll(".az");
+      for (let i = 0; i < boxes.length; i++) {
+        boxes[i].style.transition = "opacity 0.3s";
+        boxes[i].style.opacity = "1";
+        await wait(220);
+      }
+    } }, "▶ terraform apply"));
+    ctl.appendChild(el("button", { class: "ghost", onclick: () => {
+      stage.querySelectorAll(".az").forEach(b => { b.style.opacity = "0"; b.style.transition = "none"; });
+    } }, "Reset"));
+    root.appendChild(ctl);
+
+    root.appendChild(el("p", { html:
+      "<b>Everything Azure</b> in this project comes from Terraform: networks, the cluster, the database, the cache, " +
+      "the message bus, the key vault, the log analytics workspace. Two environments — dev and prod — share modules but " +
+      "differ in size and HA settings."
+    }));
+  },
+});
+
+// SCENE 15: THE BIG PICTURE ────────────────────────────────────────────────
+defineScene({
+  title: "The full picture",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "15 — Putting it together"));
+    root.appendChild(el("h1", {}, "One click, full system"));
+    root.appendChild(el("p", { html:
+      "Here's everything we've covered, all at once. Click <b>Trace a login</b> to watch one request travel the whole journey."
+    }));
+
+    const stage = el("div", { class: "stage" });
+    stage.innerHTML = `
+      <svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg">
+        <!-- Tiers as horizontal bands -->
+        <g font-family="Inter" font-size="11" fill="#6b7878">
+          <text x="14" y="40">Browser</text>
+          <text x="14" y="98">Cluster edge</text>
+          <text x="14" y="166">Gateway tier</text>
+          <text x="14" y="234">Backend services</text>
+          <text x="14" y="302">Data stores</text>
+        </g>
+        <!-- Browser -->
+        <rect x="320" y="20"  width="100" height="36" rx="6" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="bp-browser"/>
+        <text x="370" y="42" text-anchor="middle" font-size="12">Browser</text>
+        <!-- NGINX -->
+        <rect x="320" y="80"  width="100" height="36" rx="6" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="bp-nginx"/>
+        <text x="370" y="102" text-anchor="middle" font-size="12">NGINX Ingress</text>
+        <!-- Gateway -->
+        <rect x="320" y="148" width="100" height="36" rx="6" fill="#fff" stroke="#2c7a87" stroke-width="2" id="bp-gw"/>
+        <text x="370" y="170" text-anchor="middle" font-size="12">API Gateway</text>
+        <!-- Backends -->
+        <rect x="170" y="216" width="110" height="36" rx="6" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="bp-user"/>
+        <text x="225" y="238" text-anchor="middle" font-size="12">user-service</text>
+        <rect x="305" y="216" width="110" height="36" rx="6" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="bp-task"/>
+        <text x="360" y="238" text-anchor="middle" font-size="12">task-service</text>
+        <rect x="440" y="216" width="140" height="36" rx="6" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="bp-notif"/>
+        <text x="510" y="238" text-anchor="middle" font-size="12">notification-svc</text>
+        <!-- Data -->
+        <rect x="170" y="284" width="110" height="36" rx="6" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="bp-pg"/>
+        <text x="225" y="306" text-anchor="middle" font-size="12">PostgreSQL</text>
+        <rect x="305" y="284" width="110" height="36" rx="6" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="bp-redis"/>
+        <text x="360" y="306" text-anchor="middle" font-size="12">Redis</text>
+        <rect x="440" y="284" width="140" height="36" rx="6" fill="#fff" stroke="#d8cdb8" stroke-width="2" id="bp-sb"/>
+        <text x="510" y="306" text-anchor="middle" font-size="12">Service Bus</text>
+        <!-- packet -->
+        <circle id="bp-packet" cx="370" cy="38" r="6" fill="#e07b3a" opacity="0"/>
+      </svg>
+    `;
+    root.appendChild(stage);
+
+    const ctl = el("div", { class: "controls" });
+    ctl.appendChild(el("button", { onclick: async () => {
+      const p = stage.querySelector("#bp-packet");
+      const path = [
+        [370, 38],   // browser
+        [370, 98],   // nginx
+        [370, 166],  // gateway
+        [225, 234],  // user-service
+        [225, 302],  // postgres
+        [225, 234],  // back to user-service
+        [370, 166],  // back to gateway
+        [370, 38],   // back to browser
+      ];
+      p.style.transition = "none";
+      p.setAttribute("cx", path[0][0]); p.setAttribute("cy", path[0][1]);
+      p.style.opacity = "1";
+      await wait(60);
+      for (let i = 1; i < path.length; i++) {
+        p.style.transition = "all 0.55s ease-in-out";
+        p.setAttribute("cx", path[i][0]); p.setAttribute("cy", path[i][1]);
+        await wait(640);
+      }
+      p.style.opacity = "0";
+    } }, "▶ Trace a login"));
+    root.appendChild(ctl);
+
+    root.appendChild(el("p", { html:
+      "You've now seen <em>every layer</em> of a real platform: client, ingress, gateway, services, data stores. " +
+      "Plus the cross-cutting machinery — auth, rate limiting, circuit breaking, events, observability, infrastructure as code, " +
+      "Kubernetes, network policies, HMAC identity."
+    }));
+  },
+});
+
+// SCENE 16: WHAT NEXT ─────────────────────────────────────────────────────
+defineScene({
+  title: "What now?",
+  render(root) {
+    root.appendChild(el("div", { class: "meta" }, "16 — Wrap up"));
+    root.appendChild(el("h1", {}, "Where to go from here"));
+    root.appendChild(el("p", { html:
+      "You've toured every concept in this platform. The code that implements all of it is in the GitHub repo, " +
+      "structured so you can browse any layer and find the source."
+    }));
+    root.appendChild(el("p", { html:
+      "Try things in this order — each one builds on the last:"
+    }));
+    const list = el("ol", { style: { paddingLeft: "24px", lineHeight: "1.9" } });
+    [
+      ["Run it locally", "<code>docker compose up --build</code> brings up the whole platform on your machine. No Azure account needed."],
+      ["Use the app", "Open <a href=\"../index.html\">the frontend</a>, register, create projects and tasks, open the SSE stream and watch events arrive."],
+      ["Break things", "Stop a container with <code>docker compose stop user-service</code>. Watch the gateway circuit breaker trip. Restart, watch it recover."],
+      ["Read the security guide", "<code>docs/security/security-guide.md</code> — every control explained, with the attack scenario it prevents."],
+      ["Deploy to Azure", "<code>terraform/bootstrap/</code> for the state backend, then <code>terraform/environments/dev/</code> for the cluster. ~30 min, ~$200/mo while running."],
+    ].forEach(([h, b]) => list.appendChild(el("li", { html: `<b>${h}</b>. ${b}` })));
+    root.appendChild(list);
+
+    root.appendChild(el("p", { html:
+      "If you find a typo, a wrong claim, a confusing diagram — open an issue or a PR. This tour is meant to grow."
+    }));
+    root.appendChild(el("p", { html: "<a href=\"../index.html\">← Back to the app</a>" }));
+  },
+});
+
+// ─── Init / nav wiring ────────────────────────────────────────────────────
+$("#prev").addEventListener("click", () => renderScene(currentIdx - 1));
+$("#next").addEventListener("click", () => renderScene(currentIdx + 1));
+$("#toc-btn").addEventListener("click", () => $("#toc").classList.toggle("open"));
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  if (e.key === "ArrowRight") renderScene(currentIdx + 1);
+  if (e.key === "ArrowLeft")  renderScene(currentIdx - 1);
+});
+
+renderToc();
+renderScene(loadScene());
+</script>
+</body>
+</html>

@@ -1,0 +1,168 @@
+# monitoring/prometheus/alert-rules.yml
+#
+# Prometheus alerting rules. Loaded into the Prometheus server via the
+# `rule_files:` setting in prometheus.yml. Alerts fire to Alertmanager, which
+# in turn routes to Slack / PagerDuty / email.
+#
+# DESIGN NOTES:
+#   - Every alert has a "for:" clause. We never page on a single scrape — a
+#     transient blip during a pod restart or a network hiccup is not an alert.
+#   - The severity label is the FIRST thing on-call sees. We use "page" for
+#     wake-someone-up, "ticket" for everything else.
+#   - Each alert carries a runbook_url. If you find yourself debugging an
+#     alert without one, write a runbook entry and add the URL here.
+#   - SLO-driven alerts (burn-rate) are separate from infrastructure alerts
+#     (e.g. "pod down") because they have different escalation paths.
+
+groups:
+  - name: golden-signals
+    interval: 30s
+    rules:
+      # ─── Error rate ───────────────────────────────────────────────────────
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum by (job) (rate(gateway_requests_total{status_code=~"5.."}[5m]))
+            /
+            sum by (job) (rate(gateway_requests_total[5m]))
+          ) > 0.01
+        for: 10m
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: "{{ $labels.job }}: 5xx rate above 1% for 10m"
+          description: |
+            Over the last 10 minutes, more than 1% of requests to
+            {{ $labels.job }} returned a 5xx. This is a SLO-burn level error
+            rate; treat as an incident.
+          runbook_url: "https://github.com/Tarkov5502/microservices-project/blob/main/docs/runbooks/high-error-rate.md"
+
+      # ─── Latency ──────────────────────────────────────────────────────────
+      - alert: HighP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (job, le) (rate(gateway_request_duration_seconds_bucket[5m]))
+          ) > 1.0
+        for: 10m
+        labels:
+          severity: ticket
+          team: platform
+        annotations:
+          summary: "{{ $labels.job }}: p95 latency above 1.0 s for 10m"
+          description: |
+            User-facing requests to {{ $labels.job }} are slower than the
+            SLO target. Check upstream dependencies (database, redis, service
+            bus) and recent deploys.
+          runbook_url: "https://github.com/Tarkov5502/microservices-project/blob/main/docs/runbooks/high-latency.md"
+
+      # ─── Rate-limit rejections ────────────────────────────────────────────
+      - alert: SustainedRateLimitRejections
+        expr: |
+          sum by (job) (rate(gateway_requests_total{status_code="429"}[5m])) > 1
+        for: 15m
+        labels:
+          severity: ticket
+          team: platform
+        annotations:
+          summary: "{{ $labels.job }}: >1 rate-limited req/s sustained for 15m"
+          description: |
+            Either a legitimate client is hitting the limit and needs its
+            quota raised, or an attacker is pounding the API. Check the
+            X-RateLimit-Scope header on recent 429 responses to tell which.
+
+  - name: slo-burn
+    interval: 30s
+    rules:
+      # ─── SLO definition ───────────────────────────────────────────────────
+      # Service: api-gateway
+      # SLI: fraction of requests that succeed (status < 500) AND complete in <500ms
+      # SLO: 99.5% of requests over any 30-day window
+      # Error budget: 0.5% = 432 minutes / 30 days
+      #
+      # Multi-window, multi-burn-rate alerting (Google SRE workbook ch. 5):
+      #   - Fast burn: 14.4x normal burn over 1h → page
+      #   - Slow burn: 6x normal burn over 6h → ticket
+      # Both must trigger together to avoid one-off spike noise.
+      - alert: SLOFastBurn
+        expr: |
+          (
+            sum(rate(gateway_requests_total{job="api-gateway",status_code=~"5..|429"}[1h]))
+            /
+            sum(rate(gateway_requests_total{job="api-gateway"}[1h]))
+          ) > 0.072
+          AND
+          (
+            sum(rate(gateway_requests_total{job="api-gateway",status_code=~"5..|429"}[5m]))
+            /
+            sum(rate(gateway_requests_total{job="api-gateway"}[5m]))
+          ) > 0.072
+        for: 2m
+        labels:
+          severity: page
+          team: platform
+          slo: api-gateway-availability-99.5
+        annotations:
+          summary: "SLO fast burn: gateway is burning 14.4x the error budget over 1h"
+          description: |
+            At this rate, the 30-day error budget will be exhausted in
+            ~2 days. Treat as a production incident.
+
+      - alert: SLOSlowBurn
+        expr: |
+          (
+            sum(rate(gateway_requests_total{job="api-gateway",status_code=~"5..|429"}[6h]))
+            /
+            sum(rate(gateway_requests_total{job="api-gateway"}[6h]))
+          ) > 0.03
+          AND
+          (
+            sum(rate(gateway_requests_total{job="api-gateway",status_code=~"5..|429"}[30m]))
+            /
+            sum(rate(gateway_requests_total{job="api-gateway"}[30m]))
+          ) > 0.03
+        for: 15m
+        labels:
+          severity: ticket
+          team: platform
+          slo: api-gateway-availability-99.5
+        annotations:
+          summary: "SLO slow burn: gateway is burning 6x the error budget over 6h"
+
+  - name: dependencies
+    interval: 30s
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: |
+          # Circuit breaker state is not currently a Prometheus metric — this
+          # rule documents the intent. To wire it up, add a Gauge in
+          # api-gateway/app/circuit_breaker.py that exports 1 when OPEN and
+          # 0 when CLOSED, then change the expr below to match.
+          gateway_circuit_breaker_state{state="open"} == 1
+        for: 5m
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: "Circuit breaker {{ $labels.service }} OPEN for >5m"
+          description: |
+            The gateway has given up on {{ $labels.service }} after repeated
+            failures. Check {{ $labels.service }}'s logs and readiness.
+
+      - alert: PostgresConnectionPoolExhausted
+        expr: |
+          # The asyncpg/SQLAlchemy pool doesn't natively expose Prometheus
+          # metrics; recommended approach is to wrap `engine.pool.status()`
+          # in a custom Collector. See docs/runbooks/db-pool.md for the
+          # instrumentation pattern.
+          pg_pool_in_use / pg_pool_size > 0.9
+        for: 5m
+        labels:
+          severity: ticket
+          team: platform
+        annotations:
+          summary: "{{ $labels.job }}: DB pool at >90% utilisation"
+          description: |
+            Either traffic spiked or a query is leaking connections. If pool
+            stays full, requests start timing out at pool_timeout=10s.

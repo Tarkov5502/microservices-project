@@ -54,5 +54,12 @@ class User(Base):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Email verification state. We don't BLOCK login on email_verified=False
+    # today — a real product decision should determine whether unverified
+    # accounts can do anything. We track the flag and timestamp so future
+    # business logic can branch on it, and so audit log entries can carry it.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     def __repr__(self) -> str:
         return f"<User id={self.id} email={self.email}>"

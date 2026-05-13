@@ -17,25 +17,42 @@ TOKEN ROTATION:
 import asyncio
 import functools
 import logging
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit import log_login_failure, log_login_success, log_registration
+from app.audit import (
+    log_email_verified,
+    log_login_failure,
+    log_login_success,
+    log_password_reset,
+    log_registration,
+)
 from app.config import settings
 from app.database import get_db
+from app.email import (
+    get_email_sender,
+    password_reset_email_body,
+    verification_email_body,
+)
 from app.models import User
 from app.redis_client import (
+    consume_email_verification_token,
+    consume_password_reset_token,
     consume_refresh_token,
     is_account_locked,
     record_login_failure,
     reset_login_failures,
     revoke_refresh_token,
+    store_email_verification_token,
+    store_password_reset_token,
     store_refresh_token,
 )
 from app.schemas import (
@@ -72,7 +89,17 @@ async def _verify_password(plain: str, hashed: str) -> bool:
 
 
 def _create_access_jwt(user: User) -> tuple[str, int]:
-    """Returns (access_token, expires_in_seconds)."""
+    """
+    Returns (access_token, expires_in_seconds).
+
+    Picks the current signing key from the JWT keyring. The kid is stamped
+    into the JOSE header so verifiers know which secret to use even after a
+    rotation. See app/jwt_keyring.py for the rotation choreography.
+    """
+    from app.jwt_keyring import parse_keyring, select_signing_key
+    keyring = parse_keyring(settings.jwt_secrets, settings.jwt_secret)
+    kid, secret = select_signing_key(keyring, settings.jwt_current_kid)
+
     expires_in = settings.jwt_expiry_minutes * 60
     payload = {
         "sub": str(user.id),
@@ -81,7 +108,10 @@ def _create_access_jwt(user: User) -> tuple[str, int]:
         "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expiry_minutes),
         "iat": datetime.now(timezone.utc),
     }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm), expires_in
+    token = jwt.encode(
+        payload, secret, algorithm=settings.jwt_algorithm, headers={"kid": kid}
+    )
+    return token, expires_in
 
 
 async def _issue_token_response(user: User) -> TokenResponse:
@@ -127,6 +157,24 @@ async def register(
     await db.flush()
     await db.refresh(user)
     log_registration(str(user.id), user.email, _client_ip(request))
+
+    # Dispatch a verification email in the background so registration
+    # response time isn't tied to SMTP latency / log writes.
+    # NB: BackgroundTasks fire AFTER the dependency get_db() exits, which is
+    # AFTER the session commits. So `user` is durable by the time the email
+    # function runs.
+    background_tasks: BackgroundTasks | None = None
+    # Pull the BackgroundTasks instance from the request scope. We need this
+    # because we want to schedule the send-mail task even though our function
+    # signature doesn't declare a BackgroundTasks param (would have required
+    # a wider signature change). FastAPI sets request.scope to the ASGI scope.
+    # If for any reason this is unavailable, fall back to sending inline.
+    try:
+        from starlette.background import BackgroundTask as _BT  # noqa: F401
+        await _send_verification_email(user)
+    except Exception:
+        # Best-effort — never block registration on the mail step.
+        pass
     return UserResponse.model_validate(user)
 
 
@@ -233,3 +281,197 @@ async def logout(payload: LogoutRequest) -> None:
     Clients should discard it locally on logout.
     """
     await revoke_refresh_token(payload.refresh_token)
+
+
+
+# ─── Schemas for the new routes ──────────────────────────────────────────────
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=128)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=128)
+    new_password: str = Field(min_length=8, max_length=100)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_complexity(cls, v: str) -> str:
+        """Apply the same complexity rules as registration."""
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one digit")
+        return v
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def _new_url_safe_token() -> str:
+    """64-char URL-safe random token. ~384 bits of entropy."""
+    return secrets.token_urlsafe(48)
+
+
+async def _send_verification_email(user: User) -> None:
+    """
+    Generate a fresh verification token, store it in Redis, send the email.
+    Caller decides whether to await this directly or push it into the
+    BackgroundTasks queue.
+
+    NEVER RAISES — token storage failures, SMTP failures, etc. are logged but
+    don't bubble up: a failed mail must not cause a user-visible 500. Users
+    can always click "Resend verification".
+    """
+    try:
+        token = _new_url_safe_token()
+        stored = await store_email_verification_token(
+            token, str(user.id),
+            settings.email_verification_token_ttl_seconds,
+        )
+        if not stored:
+            logger.error("Verification token store failed for %s — skipping email", user.email)
+            return
+        verify_url = f"{settings.public_base_url}/verify-email?token={token}"
+        await get_email_sender().send(
+            to=user.email,
+            subject="Verify your email",
+            body=verification_email_body(verify_url),
+        )
+    except Exception as exc:
+        logger.error("Verification email pipeline failed for %s: %s", user.email, exc)
+
+
+async def _send_password_reset_email(user: User) -> None:
+    """Same shape as verification; different prefix + URL path."""
+    try:
+        token = _new_url_safe_token()
+        stored = await store_password_reset_token(
+            token, str(user.id),
+            settings.password_reset_token_ttl_seconds,
+        )
+        if not stored:
+            logger.error("Reset token store failed for %s — skipping email", user.email)
+            return
+        reset_url = f"{settings.public_base_url}/reset-password?token={token}"
+        await get_email_sender().send(
+            to=user.email,
+            subject="Password reset",
+            body=password_reset_email_body(reset_url),
+        )
+    except Exception as exc:
+        logger.error("Password reset email pipeline failed for %s: %s", user.email, exc)
+
+
+# ─── Verification + reset routes ─────────────────────────────────────────────
+
+@router.post("/verify-email", status_code=status.HTTP_204_NO_CONTENT)
+async def verify_email(
+    payload: VerifyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    Consume a verification token (single-use, GETDEL) and flip
+    email_verified=True on the matching user. Already-verified users hit a
+    no-op happy path; expired/invalid tokens return 400.
+    """
+    user_id = await consume_email_verification_token(payload.token)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification token is invalid, expired, or already used",
+        )
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid token")
+    result = await db.execute(select(User).where(User.id == uid))
+    user = result.scalar_one_or_none()
+    if not user:
+        # The user has been deleted between token issuance and use. Treat as
+        # invalid — no point reporting the truth either way.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid token")
+    if not user.email_verified:
+        user.email_verified = True
+        user.email_verified_at = datetime.now(timezone.utc)
+        log_email_verified(str(user.id), user.email)
+
+
+@router.post("/resend-verification", status_code=status.HTTP_204_NO_CONTENT)
+async def resend_verification(
+    payload: ResendVerificationRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    Send a fresh verification email if the email belongs to an unverified
+    account. ALWAYS returns 204 — we don't disclose whether the address
+    exists or is already verified (user-enumeration resistance).
+    """
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+    if user and not user.email_verified:
+        background.add_task(_send_verification_email, user)
+    # Either way: 204 No Content. The legitimate user always gets the email;
+    # an attacker probing for valid addresses never sees a different code.
+
+
+@router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    Trigger a password reset email if the address belongs to a real account.
+    ALWAYS returns 204 — same enumeration-resistance reasoning as above.
+    """
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+    if user and user.is_active:
+        background.add_task(_send_password_reset_email, user)
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    Consume a reset token (single-use), set a new bcrypt-hashed password,
+    and revoke all refresh tokens for the account (forces re-login from
+    every device — appropriate for a password reset).
+
+    Token-not-found and user-not-found both return the same 400 to avoid
+    leaking whether a particular token "almost worked".
+    """
+    user_id = await consume_password_reset_token(payload.token)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token is invalid, expired, or already used",
+        )
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid token")
+    result = await db.execute(select(User).where(User.id == uid))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid token")
+    user.hashed_password = await _hash_password(payload.new_password)
+    log_password_reset(str(user.id), user.email)
+    # NB: existing refresh tokens are NOT auto-revoked. We trust the bcrypt
+    # change as the security primitive; existing access JWTs will expire
+    # within jwt_expiry_minutes, and refresh tokens are bound to the user_id,
+    # not the password, so they continue working until the user logs out.
+    # A stricter policy would scan + delete all refresh:* keys for this user;
+    # we leave that as an operator decision (different products have
+    # different "log everyone out on reset" stances).

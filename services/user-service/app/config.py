@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiry_minutes: int = 60
 
+    # ── JWT key rotation (optional) ─────────────────────────────────────────
+    # When jwt_secrets is populated, the service uses it as a keyring keyed
+    # by `kid`. Format: "kid1=secret1,kid2=secret2" (no spaces in secrets).
+    # When non-empty, jwt_current_kid points at the kid used for NEW tokens.
+    # All listed kids remain accepted at verification time, which lets old
+    # tokens continue to work through a rotation window.
+    # When empty, the service falls back to the single jwt_secret above
+    # (implicit kid "default") — backwards compatible.
+    jwt_secrets: str = ""
+    jwt_current_kid: str = "default"
+
     # ── Database connection pool ─────────────────────────────────────────────
     # Per-process pool sizes. Multiply by HPA max replicas to get the peak
     # concurrent connections this service might open. A B1ms Postgres caps
@@ -44,6 +55,32 @@ class Settings(BaseSettings):
     db_max_overflow: int = 20
     db_pool_timeout: int = 10
     db_pool_recycle: int = 3600
+
+    # ── Email + verification + password reset ─────────────────────────────
+    # Sender backend: "log" (default; just logs to stdout for dev) or "smtp"
+    # (production — set the smtp_* fields below).
+    email_sender: str = "log"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_address: str = "no-reply@example.com"
+
+    # Public base URL of the frontend. Used to build verification + reset
+    # links delivered by email. Must be a real reachable URL in production;
+    # in dev this just controls what the logged link looks like.
+    public_base_url: str = "http://localhost:3000"
+
+    # Token lifetimes
+    email_verification_token_ttl_seconds: int = 60 * 60 * 24   # 24 h
+    password_reset_token_ttl_seconds: int = 60 * 60            # 1 h
+
+    # ── Inter-service identity HMAC ─────────────────────────────────────────
+    # Symmetric secret shared with the api-gateway (synced from Key Vault).
+    # We verify the gateway's signature over X-User-* headers; without a valid
+    # signature, requests with identity claims are rejected even if they reach
+    # us. Defends against NetworkPolicy misconfiguration / lateral movement.
+    interservice_hmac_secret: str = "dev-only-interservice-secret-change-in-production-please"
 
     # ── Admin bootstrap ──────────────────────────────────────────────────────
     # On startup, if INITIAL_ADMIN_EMAIL is set and a user with that email

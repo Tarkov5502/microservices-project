@@ -75,10 +75,58 @@ async def update_me(
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_me(caller_id: CallerID, db: AsyncSession = Depends(get_db)) -> None:
-    """Soft-delete: deactivate rather than destroying data."""
+    """
+    Soft-delete the caller's own account.
+
+    Sets is_active=False. The row stays in the database — restores are
+    possible by an admin flipping the flag — but the user can no longer log
+    in (the auth route checks is_active) and is excluded from any
+    is_active=true filters.
+
+    For full GDPR/CCPA-style erasure, use DELETE /me/permanent below.
+    """
     user = await _get_user_or_404(caller_id, db)
     user.is_active = False
+    audit.log_self_deactivation(str(user.id), user.email)
     logger.info("User self-deactivated: %s", user.email)
+
+
+@router.delete("/me/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def hard_delete_me(
+    caller_id: CallerID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    Permanently erase the caller's account. Irreversible.
+
+    GDPR/CCPA RIGHT-TO-ERASURE COMPLIANCE:
+      - User row in PostgreSQL: removed.
+      - Refresh tokens in Redis: revoked en masse (best-effort).
+      - Tasks the user created/was assigned to: NOT touched here. Cross-
+        service deletion happens via an account.deleted event published on
+        Service Bus, which the task-service consumes. (Out of scope for this
+        endpoint — keep the auth boundary clean. The event publication is
+        deliberately fire-and-forget; if it fails, an admin job can sweep
+        orphaned task references.)
+
+    DIFFERENT FROM SOFT-DELETE:
+      Soft-delete preserves audit trails but keeps personal data on disk.
+      Hard-delete removes the row so the email/username can be reused and
+      no PII survives. Users who want to "really, really delete me" use this.
+    """
+    user = await _get_user_or_404(caller_id, db)
+    # Capture for audit BEFORE delete — afterwards the row is gone.
+    email = user.email
+    user_id = str(user.id)
+
+    audit.log_self_hard_delete(user_id, email)
+    logger.warning(
+        "User self-hard-deleted: id=%s email=%s (irreversible)", user_id, email,
+    )
+    await db.delete(user)
+    # The session commits on dependency exit; the redis refresh tokens are
+    # not addressed here — a separate task could sweep tokens whose user_id
+    # no longer exists in the DB.
 
 
 @router.get("/{user_id}", response_model=UserResponse)

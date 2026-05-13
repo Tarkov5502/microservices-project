@@ -15,6 +15,8 @@ from fastapi import FastAPI, Response
 from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
+from app.security_headers import SecurityHeadersMiddleware
+from app.identity_signing import IdentityVerifierMiddleware
 from app.consumer import ServiceBusConsumer
 from app.telemetry import init_telemetry
 from app.routes.stream import router as stream_router
@@ -75,6 +77,21 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs" if settings.environment != "production" else None,
     lifespan=lifespan,
+)
+
+# Defence-in-depth security headers. Applied to every response so that
+# even if NetworkPolicy is misconfigured and a browser reaches this
+# service directly, our responses are still hardened. Cheap and additive.
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Verify that X-User-* headers were signed by the gateway. Reject any
+# request that claims an identity without a valid signature. Health
+# and metrics endpoints are exempt because they're hit by kubelet /
+# Prometheus, not via the gateway.
+app.add_middleware(
+    IdentityVerifierMiddleware,
+    secret=settings.interservice_hmac_secret,
+    exempt_paths=["/health", "/health/ready", "/metrics"],
 )
 
 app.include_router(stream_router, prefix="/api/v1/notifications", tags=["notifications"])

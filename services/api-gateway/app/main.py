@@ -30,6 +30,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from app.config import settings
 from app.routes.proxy import router as proxy_router
 from app.middleware.auth import JWTAuthMiddleware
+from app.middleware.body_size import BodySizeLimitMiddleware
 from app.middleware.rate_limiter import RateLimiterMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.correlation import CorrelationMiddleware
@@ -115,6 +116,7 @@ app.add_middleware(
     max_requests=settings.rate_limit_requests,
     window_seconds=settings.rate_limit_window_seconds,
     auth_max_requests=settings.auth_rate_limit_requests,
+    user_max_requests=settings.user_rate_limit_requests,
     redis_url=settings.redis_url,
 )
 
@@ -132,6 +134,10 @@ app.add_middleware(
     # be cleanly revoked.
     exempt_prefixes=["/api/v1/auth/"],
 )
+
+# Outermost on the request path — rejects oversized bodies before any other
+# middleware buffers them. Added LAST so it runs FIRST (Starlette LIFO).
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 app.include_router(proxy_router)

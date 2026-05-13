@@ -13,6 +13,8 @@ from sqlalchemy import select, text
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.config import settings
+from app.security_headers import SecurityHeadersMiddleware
+from app.identity_signing import IdentityVerifierMiddleware
 from app.database import AsyncSessionLocal, engine, Base
 from app.models import User
 from app.routes.auth import router as auth_router
@@ -118,6 +120,21 @@ app = FastAPI(
 # reachable from the API Gateway inside the cluster via NetworkPolicy.
 # Enabling CORS here would allow any origin to bypass the gateway if the
 # service were ever accidentally exposed.
+# Defence-in-depth security headers. Applied to every response so that
+# even if NetworkPolicy is misconfigured and a browser reaches this
+# service directly, our responses are still hardened. Cheap and additive.
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Verify that X-User-* headers were signed by the gateway. Reject any
+# request that claims an identity without a valid signature. Health
+# and metrics endpoints are exempt because they're hit by kubelet /
+# Prometheus, not via the gateway.
+app.add_middleware(
+    IdentityVerifierMiddleware,
+    secret=settings.interservice_hmac_secret,
+    exempt_paths=["/health", "/health/ready", "/metrics"],
+)
+
 app.include_router(auth_router,  prefix="/api/v1/auth",  tags=["Authentication"])
 app.include_router(users_router, prefix="/api/v1/users", tags=["Users"])
 

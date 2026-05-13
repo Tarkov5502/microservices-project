@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # ── JWT ──────────────────────────────────────────────────────────────────
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
+    # See user-service/app/config.py for the full rationale. Same keyring
+    # format applies here: "kid1=secret1,kid2=secret2", parsed by the auth
+    # middleware to pick the right verification key based on the JWT header's
+    # `kid` claim. Empty → fall back to the single jwt_secret above.
+    jwt_secrets: str = ""
+    jwt_current_kid: str = "default"
 
     # ── Upstream URLs ─────────────────────────────────────────────────────────
     user_service_url: str = "http://user-service:8001"
@@ -89,11 +95,31 @@ class Settings(BaseSettings):
     )
 
     # ── Rate limiting ──────────────────────────────────────────────────
+    # ── Body size limit ──────────────────────────────────────────────────
+    # Reject requests whose body exceeds this many bytes. The default is 1 MiB,
+    # an order of magnitude above the largest legitimate JSON payload in this
+    # platform. Override per environment if you need to accept attachments.
+    max_body_bytes: int = 1 * 1024 * 1024
+
     rate_limit_requests: int = 100        # General limit per IP per window
     rate_limit_window_seconds: int = 60
     # Tighter limit for login/register — prevents password brute-force.
     # 10 attempts/min = still comfortable for real users, painful for bots.
     auth_rate_limit_requests: int = 10
+
+    # Per-authenticated-user budget per window. Applied IN ADDITION to the
+    # per-IP budget. A user on a corporate NAT shares one IP bucket with
+    # hundreds of co-workers — without this, any one of them can DOS the
+    # others. 300 req/min is a comfortable ceiling for a typical UI session.
+    user_rate_limit_requests: int = 300
+
+
+    # ── Inter-service identity HMAC ─────────────────────────────────────────
+    # Symmetric secret shared with the backend services (synced from Key Vault).
+    # The proxy signs the X-User-* identity headers it forwards; backends verify
+    # before trusting the headers. Defends against the case where NetworkPolicy
+    # is misconfigured and someone reaches a backend directly.
+    interservice_hmac_secret: str = "dev-only-interservice-secret-change-in-production-please"
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     # Used by the rate limiter to share state across multiple gateway replicas.

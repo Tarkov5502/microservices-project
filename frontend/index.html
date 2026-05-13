@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Task Platform</title>
+  <!--
+    Single-file UI for the microservices platform. Deliberately built with
+    only vanilla JS + a tiny CSS reset — no build system, no framework, no
+    npm. The point is to demonstrate that the API is usable end-to-end and
+    to give operators something they can serve from any static host
+    (NGINX, Azure Blob $web, GitHub Pages) without a Node toolchain.
+
+    CONFIGURE the gateway URL below. If the API is on the same origin as
+    this page, leave it as "" and the fetch calls will use relative paths.
+  -->
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #60a5fa;
+      --danger: #f87171;
+      --ok: #4ade80;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0; padding: 0; background: var(--bg); color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 16px 24px; background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { margin: 0; font-size: 18px; }
+    header .who { font-size: 13px; color: var(--muted); }
+    main { padding: 24px; max-width: 900px; margin: 0 auto; }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 20px; margin-bottom: 20px;
+    }
+    .panel h2 { margin: 0 0 16px; font-size: 16px; color: var(--accent); }
+    label { display: block; margin: 12px 0 4px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+    input[type=text], input[type=email], input[type=password], textarea, select {
+      width: 100%; padding: 8px 10px; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 4px; font: inherit;
+    }
+    button {
+      padding: 8px 16px; background: var(--accent); color: #0f172a;
+      border: none; border-radius: 4px; font-weight: 600; cursor: pointer;
+      font: inherit;
+    }
+    button:hover { filter: brightness(1.1); }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.danger { background: var(--danger); color: var(--bg); }
+    .row { display: flex; gap: 12px; align-items: flex-end; }
+    .row > * { flex: 1; }
+    .msg { padding: 8px 12px; border-radius: 4px; margin: 12px 0; font-size: 13px; }
+    .msg.error { background: rgba(248, 113, 113, 0.15); color: var(--danger); border: 1px solid var(--danger); }
+    .msg.ok { background: rgba(74, 222, 128, 0.15); color: var(--ok); border: 1px solid var(--ok); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    .badge {
+      display: inline-block; padding: 2px 6px; font-size: 11px;
+      border-radius: 3px; background: var(--border); color: var(--text);
+    }
+    .hidden { display: none; }
+    .small { font-size: 12px; color: var(--muted); }
+    .config { font-size: 12px; color: var(--muted); margin-top: 24px; }
+    .config code { background: var(--bg); padding: 2px 4px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Task Platform</h1>
+    <div class="who">
+      <a href="learn/" style="margin-right: 12px; color: var(--muted); font-size: 13px; text-decoration: none;">★ Take the tour</a>
+      <span id="who-text">not logged in</span>
+      <button id="logout-btn" class="secondary hidden" style="margin-left: 12px;">Log out</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Auth panels -->
+    <section id="auth-section">
+      <div class="panel">
+        <h2>Log in</h2>
+        <div id="login-msg"></div>
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" autocomplete="username" />
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" autocomplete="current-password" />
+        <div style="margin-top: 16px;">
+          <button id="login-btn">Log in</button>
+          <button id="forgot-btn" class="secondary" type="button" style="margin-left: 8px;">Forgot password?</button>
+        </div>
+      </div>
+
+      <div class="panel hidden" id="forgot-panel">
+        <h2>Reset your password</h2>
+        <div id="forgot-msg"></div>
+        <p class="small">
+          Enter your email. If an account exists, we'll send a reset link.
+          For security, we don't confirm whether the address is registered.
+        </p>
+        <label for="forgot-email">Email</label>
+        <input type="email" id="forgot-email" />
+        <div style="margin-top: 16px;">
+          <button id="forgot-submit">Send reset email</button>
+          <button id="forgot-cancel" class="secondary" type="button">Cancel</button>
+        </div>
+      </div>
+
+      <div class="panel hidden" id="reset-panel">
+        <h2>Choose a new password</h2>
+        <div id="reset-msg"></div>
+        <p class="small">
+          Enter a new password (≥ 8 chars, one uppercase, one digit).
+          The reset link in your email is single-use.
+        </p>
+        <label for="reset-pw">New password</label>
+        <input type="password" id="reset-pw" autocomplete="new-password" />
+        <div style="margin-top: 16px;">
+          <button id="reset-submit">Set new password</button>
+        </div>
+      </div>
+
+      <div class="panel hidden" id="verify-panel">
+        <h2>Email verification</h2>
+        <div id="verify-msg"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Register</h2>
+        <div id="register-msg"></div>
+        <label for="reg-email">Email</label>
+        <input type="email" id="reg-email" autocomplete="email" />
+        <label for="reg-username">Username</label>
+        <input type="text" id="reg-username" autocomplete="username" />
+        <label for="reg-password">Password (≥ 8 chars, one uppercase, one digit)</label>
+        <input type="password" id="reg-password" autocomplete="new-password" />
+        <label for="reg-full-name">Full name (optional)</label>
+        <input type="text" id="reg-full-name" />
+        <div style="margin-top: 16px;">
+          <button id="register-btn">Create account</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Authenticated view -->
+    <section id="app-section" class="hidden">
+      <div class="panel">
+        <h2>Your projects</h2>
+        <div id="project-msg"></div>
+        <table id="project-table">
+          <thead><tr><th>Name</th><th>Description</th><th>Created</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <h3 style="margin-top: 20px; font-size: 14px;">Create a project</h3>
+        <div class="row">
+          <div>
+            <label for="proj-name">Name</label>
+            <input type="text" id="proj-name" />
+          </div>
+          <div>
+            <label for="proj-desc">Description</label>
+            <input type="text" id="proj-desc" />
+          </div>
+          <div style="flex: 0;">
+            <button id="create-project-btn">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Your tasks</h2>
+        <div id="task-msg"></div>
+        <table id="task-table">
+          <thead><tr><th>Title</th><th>Project</th><th>Status</th><th>Priority</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <h3 style="margin-top: 20px; font-size: 14px;">Create a task</h3>
+        <label for="task-project">Project</label>
+        <select id="task-project"></select>
+        <label for="task-title">Title</label>
+        <input type="text" id="task-title" />
+        <label for="task-priority">Priority</label>
+        <select id="task-priority">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+          <option value="critical">Critical</option>
+        </select>
+        <div style="margin-top: 16px;">
+          <button id="create-task-btn">Create task</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Real-time notifications</h2>
+        <p class="small">
+          Opens a Server-Sent Events stream to <code>/api/v1/notifications/stream</code>.
+          New events appear at the top.
+        </p>
+        <button id="sse-toggle">Connect</button>
+        <ul id="sse-log" style="margin-top: 16px; padding-left: 20px; font-family: monospace; font-size: 12px;"></ul>
+      </div>
+
+      <div class="panel">
+        <h2 style="color: var(--danger);">Danger zone</h2>
+        <p class="small">
+          Deactivate disables your account (recoverable by an admin).
+          Permanent deletion erases your row from the database and cannot be undone (GDPR-compliant).
+        </p>
+        <button id="deactivate-btn" class="secondary">Deactivate my account</button>
+        <button id="hard-delete-btn" class="danger">Permanently delete my account</button>
+      </div>
+    </section>
+
+    <p class="config">
+      Gateway URL: <code id="api-url">(relative to this page's origin)</code>.
+      Override at the top of <code>index.html</code> for a non-collocated deploy.
+    </p>
+  </main>
+
+  <script>
+    // ─── Config ────────────────────────────────────────────────────────────
+    // If you serve this page from a different origin than the gateway (e.g.
+    // GitHub Pages static + gateway at api.example.com), set this to the
+    // gateway's full URL: "https://api.example.com".
+    // Empty string = same-origin (NGINX Ingress serves both).
+    const API_BASE = "";
+
+    // ─── State ─────────────────────────────────────────────────────────────
+    let accessToken = null;
+    let refreshToken = null;
+    let currentUser = null;
+    let projects = [];
+    let tasks = [];
+    let sse = null;
+
+    // ─── Helpers ───────────────────────────────────────────────────────────
+    function $(id) { return document.getElementById(id); }
+    function showMsg(elId, kind, text) {
+      const el = $(elId);
+      el.className = "msg " + kind;
+      el.textContent = text;
+      setTimeout(() => { el.textContent = ""; el.className = ""; }, kind === "error" ? 6000 : 3000);
+    }
+
+    async function api(method, path, body) {
+      const headers = {"Content-Type": "application/json"};
+      if (accessToken) headers["Authorization"] = "Bearer " + accessToken;
+      const resp = await fetch(API_BASE + path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      let payload = null;
+      try { payload = await resp.json(); } catch { /* 204 no content */ }
+      if (!resp.ok) {
+        const err = new Error((payload && payload.detail) || ("HTTP " + resp.status));
+        err.status = resp.status;
+        throw err;
+      }
+      return payload;
+    }
+
+    function showApp() {
+      $("auth-section").classList.add("hidden");
+      $("app-section").classList.remove("hidden");
+      $("who-text").textContent = currentUser ? `${currentUser.username} (${currentUser.email})` : "";
+      $("logout-btn").classList.remove("hidden");
+    }
+
+    function showAuth() {
+      $("auth-section").classList.remove("hidden");
+      $("app-section").classList.add("hidden");
+      $("who-text").textContent = "not logged in";
+      $("logout-btn").classList.add("hidden");
+      accessToken = null;
+      refreshToken = null;
+      currentUser = null;
+      if (sse) { sse.close(); sse = null; $("sse-toggle").textContent = "Connect"; }
+    }
+
+    // ─── Auth ──────────────────────────────────────────────────────────────
+    $("login-btn").addEventListener("click", async () => {
+      try {
+        const data = await api("POST", "/api/v1/auth/login", {
+          email: $("login-email").value.trim(),
+          password: $("login-password").value,
+        });
+        accessToken = data.access_token;
+        refreshToken = data.refresh_token;
+        currentUser = data.user;
+        showApp();
+        await refresh();
+      } catch (e) {
+        showMsg("login-msg", "error", e.message);
+      }
+    });
+
+    $("register-btn").addEventListener("click", async () => {
+      try {
+        const payload = {
+          email:    $("reg-email").value.trim(),
+          username: $("reg-username").value.trim(),
+          password: $("reg-password").value,
+        };
+        const fn = $("reg-full-name").value.trim();
+        if (fn) payload.full_name = fn;
+        await api("POST", "/api/v1/auth/register", payload);
+        showMsg("register-msg", "ok", "Account created. Logging you in…");
+        $("login-email").value = payload.email;
+        $("login-password").value = payload.password;
+        $("login-btn").click();
+      } catch (e) {
+        showMsg("register-msg", "error", e.message);
+      }
+    });
+
+    $("logout-btn").addEventListener("click", async () => {
+      try {
+        if (refreshToken) {
+          await api("POST", "/api/v1/auth/logout", { refresh_token: refreshToken });
+        }
+      } catch { /* logout is best-effort */ }
+      showAuth();
+    });
+
+    // ─── Projects ──────────────────────────────────────────────────────────
+    async function loadProjects() {
+      const data = await api("GET", "/api/v1/projects/");
+      projects = data.items || [];
+      const tbody = $("project-table").querySelector("tbody");
+      tbody.innerHTML = "";
+      for (const p of projects) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.description || "")}</td><td class="small">${new Date(p.created_at).toLocaleString()}</td>`;
+        tbody.appendChild(tr);
+      }
+      const sel = $("task-project");
+      sel.innerHTML = "";
+      for (const p of projects) {
+        const opt = document.createElement("option");
+        opt.value = p.id; opt.textContent = p.name;
+        sel.appendChild(opt);
+      }
+    }
+
+    $("create-project-btn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/v1/projects/", {
+          name: $("proj-name").value.trim(),
+          description: $("proj-desc").value.trim() || null,
+        });
+        $("proj-name").value = ""; $("proj-desc").value = "";
+        await loadProjects();
+        showMsg("project-msg", "ok", "Project created");
+      } catch (e) {
+        showMsg("project-msg", "error", e.message);
+      }
+    });
+
+    // ─── Tasks ─────────────────────────────────────────────────────────────
+    async function loadTasks() {
+      const data = await api("GET", "/api/v1/tasks/");
+      tasks = data.items || [];
+      const tbody = $("task-table").querySelector("tbody");
+      tbody.innerHTML = "";
+      for (const t of tasks) {
+        const proj = projects.find(p => p.id === t.project_id);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(t.title)}</td>
+          <td>${escapeHtml(proj ? proj.name : "—")}</td>
+          <td><span class="badge">${escapeHtml(t.status)}</span></td>
+          <td><span class="badge">${escapeHtml(t.priority)}</span></td>
+          <td><button class="secondary del" data-id="${t.id}">Delete</button></td>
+        `;
+        tbody.appendChild(tr);
+      }
+      tbody.querySelectorAll(".del").forEach(btn => btn.addEventListener("click", async () => {
+        try {
+          await api("DELETE", "/api/v1/tasks/" + btn.dataset.id);
+          await loadTasks();
+        } catch (e) { showMsg("task-msg", "error", e.message); }
+      }));
+    }
+
+    $("create-task-btn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/v1/tasks/", {
+          title:      $("task-title").value.trim(),
+          priority:   $("task-priority").value,
+          project_id: $("task-project").value,
+        });
+        $("task-title").value = "";
+        await loadTasks();
+        showMsg("task-msg", "ok", "Task created");
+      } catch (e) {
+        showMsg("task-msg", "error", e.message);
+      }
+    });
+
+    async function refresh() {
+      await loadProjects();
+      await loadTasks();
+    }
+
+    // ─── SSE notifications ─────────────────────────────────────────────────
+    $("sse-toggle").addEventListener("click", () => {
+      if (sse) {
+        sse.close(); sse = null;
+        $("sse-toggle").textContent = "Connect";
+        return;
+      }
+      // EventSource doesn't support custom headers in all browsers; some
+      // production deploys put the token in a query string. For a learning
+      // setup the easiest thing is to fall back to fetch+ReadableStream.
+      sse = streamSSE("/api/v1/notifications/stream", accessToken, msg => {
+        const li = document.createElement("li");
+        li.textContent = new Date().toLocaleTimeString() + " " + msg;
+        $("sse-log").prepend(li);
+      });
+      $("sse-toggle").textContent = "Disconnect";
+    });
+
+    async function streamSSE(path, token, onMessage) {
+      const ctrl = new AbortController();
+      (async () => {
+        try {
+          const resp = await fetch(API_BASE + path, {
+            headers: { Authorization: "Bearer " + token, Accept: "text/event-stream" },
+            signal: ctrl.signal,
+          });
+          if (!resp.ok || !resp.body) {
+            onMessage("(connect failed: " + resp.status + ")");
+            return;
+          }
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let buf = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) { onMessage("(stream closed)"); break; }
+            buf += decoder.decode(value, { stream: true });
+            for (;;) {
+              const idx = buf.indexOf("\n\n");
+              if (idx === -1) break;
+              const event = buf.slice(0, idx); buf = buf.slice(idx + 2);
+              for (const line of event.split("\n")) {
+                if (line.startsWith("data: ")) onMessage(line.slice(6));
+              }
+            }
+          }
+        } catch (e) {
+          if (e.name !== "AbortError") onMessage("(stream error: " + e.message + ")");
+        }
+      })();
+      return { close: () => ctrl.abort() };
+    }
+
+    // ─── Account deletion ──────────────────────────────────────────────────
+    $("deactivate-btn").addEventListener("click", async () => {
+      if (!confirm("Deactivate your account? You can be restored by an admin.")) return;
+      try {
+        await api("DELETE", "/api/v1/users/me");
+        alert("Account deactivated.");
+        showAuth();
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    });
+
+    $("hard-delete-btn").addEventListener("click", async () => {
+      if (!confirm("PERMANENTLY delete your account? This cannot be undone.")) return;
+      if (!confirm("Really? This deletes your data forever.")) return;
+      try {
+        await api("DELETE", "/api/v1/users/me/permanent");
+        alert("Account deleted.");
+        showAuth();
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    });
+
+    // ─── XSS safety ─────────────────────────────────────────────────────────
+    // We render user-supplied strings (task titles, project names) into the
+    // DOM. textContent is safe; concatenating into innerHTML is not. For the
+    // table rendering above we use template strings, so escape carefully.
+    // ─── Forgot / reset / verify-email flows ──────────────────────────────
+    $("forgot-btn").addEventListener("click", () => {
+      $("forgot-panel").classList.remove("hidden");
+      $("forgot-email").focus();
+    });
+    $("forgot-cancel").addEventListener("click", () => {
+      $("forgot-panel").classList.add("hidden");
+    });
+    $("forgot-submit").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/v1/auth/forgot-password", {
+          email: $("forgot-email").value.trim(),
+        });
+        // Endpoint returns 204 regardless of whether the email exists.
+        // Show a neutral confirmation either way.
+        showMsg("forgot-msg", "ok",
+          "If that address is registered, a reset email is on its way.");
+      } catch (e) {
+        showMsg("forgot-msg", "error", e.message);
+      }
+    });
+
+    $("reset-submit").addEventListener("click", async () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get("token");
+        if (!token) {
+          showMsg("reset-msg", "error", "Missing reset token in URL.");
+          return;
+        }
+        await api("POST", "/api/v1/auth/reset-password", {
+          token, new_password: $("reset-pw").value,
+        });
+        showMsg("reset-msg", "ok", "Password updated. Log in with your new password.");
+        // Clear the token from the URL so a back-button doesn't reuse it.
+        history.replaceState({}, "", window.location.pathname);
+      } catch (e) {
+        showMsg("reset-msg", "error", e.message);
+      }
+    });
+
+    // On page load: if the URL has ?token=... + a path hint, run the matching
+    // flow. The frontend uses query params instead of routes so it can be
+    // served as a single static file with no router.
+    (async function initFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get("token");
+      if (!token) return;
+      if (window.location.pathname.endsWith("/verify-email") || params.get("flow") === "verify") {
+        $("verify-panel").classList.remove("hidden");
+        try {
+          await api("POST", "/api/v1/auth/verify-email", { token });
+          showMsg("verify-msg", "ok", "Email verified! You can now log in.");
+        } catch (e) {
+          showMsg("verify-msg", "error", e.message);
+        }
+        history.replaceState({}, "", window.location.pathname);
+      } else if (window.location.pathname.endsWith("/reset-password") || params.get("flow") === "reset") {
+        $("reset-panel").classList.remove("hidden");
+      }
+    })();
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+  </script>
+</body>
+</html>
