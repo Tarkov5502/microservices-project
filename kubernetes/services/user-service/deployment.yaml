@@ -33,7 +33,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: user-service
-          image: ${ACR_LOGIN_SERVER}/user-service:latest
+          image: ${ACR_LOGIN_SERVER}/user-service:${IMAGE_TAG}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8001

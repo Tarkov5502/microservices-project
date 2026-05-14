@@ -76,7 +76,7 @@ spec:
 
       containers:
         - name: api-gateway
-          image: ${ACR_LOGIN_SERVER}/api-gateway:latest
+          image: ${ACR_LOGIN_SERVER}/api-gateway:${IMAGE_TAG}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000

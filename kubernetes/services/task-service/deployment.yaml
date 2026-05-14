@@ -33,7 +33,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: task-service
-          image: ${ACR_LOGIN_SERVER}/task-service:latest
+          image: ${ACR_LOGIN_SERVER}/task-service:${IMAGE_TAG}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8002

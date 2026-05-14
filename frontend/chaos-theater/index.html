@@ -1,0 +1,1562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chaos Theater — live resilience demonstration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Cinzel:wght@500;600&display=swap" rel="stylesheet">
+<style>
+/* ═════════════════════════════════════════════════════════════════════
+   CHAOS THEATER — pristine UI
+   Built around 4 regions: actions sidebar, architecture diagram, service
+   tiles with sparklines, multi-metric charts, filterable timeline,
+   educational panel. Single file. Vanilla CSS + JS.
+   ═════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Background depths */
+  --bg-deep:    #050810;
+  --bg:         #0a1119;
+  --bg-card:    #121b27;
+  --bg-elev:    #1a2533;
+  --bg-hover:   #243240;
+
+  /* Borders */
+  --line:       #1f2c3a;
+  --line-mid:   #2a3a4a;
+  --line-bright:#3a4a5d;
+
+  /* Text */
+  --ink:        #e2e8f0;
+  --ink-soft:   #b8c4d2;
+  --ink-mute:  #7a8a9c;
+  --ink-dim:    #4a5868;
+
+  /* Status palette */
+  --alert:      #ff4757;
+  --alert-soft: rgba(255, 71, 87, 0.12);
+  --alert-glow: rgba(255, 71, 87, 0.35);
+  --warn:       #f4b942;
+  --warn-soft:  rgba(244, 185, 66, 0.12);
+  --health:     #36d399;
+  --health-soft:rgba(54, 211, 153, 0.12);
+  --info:       #6ab1f2;
+  --info-soft:  rgba(106, 177, 242, 0.12);
+  --crit:       #ff5e7a;
+  --success:    #4cc9a0;
+  --teal:       #5fd8c7;
+  --purple:     #b46cd6;
+  --orange:     #ff8c5a;
+  --pink:       #f06ba1;
+
+  /* Service colors */
+  --svc-gateway:    #ff4757;
+  --svc-user:       #6ab1f2;
+  --svc-task:       #f4b942;
+  --svc-notif:      #4cc9a0;
+  --svc-postgres:   #b46cd6;
+  --svc-redis:      #f06ba1;
+
+  /* Typography */
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-ui:   "Inter", system-ui, sans-serif;
+  --font-head: "Cinzel", serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%; background: var(--bg-deep); color: var(--ink);
+  font-family: var(--font-ui); font-size: 13px;
+}
+body {
+  background:
+    radial-gradient(ellipse at 80% -20%, rgba(255, 71, 87, 0.08), transparent 50%),
+    radial-gradient(ellipse at -10% 100%, rgba(106, 177, 242, 0.06), transparent 55%),
+    var(--bg-deep);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+button { font-family: inherit; cursor: pointer; outline: none; border: none; background: none; color: inherit; }
+button:disabled { cursor: not-allowed; opacity: 0.4; }
+input, select { font-family: inherit; outline: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TOP NAVBAR
+   ═══════════════════════════════════════════════════════════════════════ */
+header.navbar {
+  height: 52px; flex: 0 0 52px;
+  background: rgba(10, 17, 25, 0.95);
+  border-bottom: 1px solid var(--line);
+  padding: 0 22px;
+  display: flex; align-items: center; gap: 18px;
+  position: relative; z-index: 50;
+  backdrop-filter: blur(12px);
+}
+.navbar .brand {
+  font-family: var(--font-head); font-size: 17px; letter-spacing: 0.2em;
+  color: var(--ink); font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+}
+.navbar .brand .dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--alert);
+  box-shadow: 0 0 12px var(--alert-glow);
+  animation: brand-pulse 2.5s ease-in-out infinite;
+}
+@keyframes brand-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+.navbar .tagline {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em;
+  color: var(--ink-dim); text-transform: uppercase;
+  padding-left: 14px; border-left: 1px solid var(--line);
+}
+.navbar .stats {
+  display: flex; gap: 16px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--ink-mute); letter-spacing: 0.05em;
+  margin-left: auto;
+}
+.navbar .stats .stat {
+  display: flex; align-items: center; gap: 6px;
+}
+.navbar .stats .stat b { color: var(--ink); font-weight: 600; }
+.navbar .conn {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--ink-mute); letter-spacing: 0.05em;
+}
+.navbar .conn .pip {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ink-dim);
+}
+.navbar .conn.live .pip {
+  background: var(--health); box-shadow: 0 0 8px var(--health);
+}
+.navbar .conn.disconnected .pip { background: var(--alert); }
+.navbar .actions {
+  display: flex; gap: 6px;
+}
+.icon-btn {
+  width: 32px; height: 32px;
+  background: transparent; border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink-mute); display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s; font-size: 14px;
+}
+.icon-btn:hover { color: var(--ink); border-color: var(--ink-dim); background: var(--bg-hover); }
+.icon-btn.active { color: var(--warn); border-color: rgba(244, 185, 66, 0.5); background: var(--warn-soft); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MAIN LAYOUT
+   ═══════════════════════════════════════════════════════════════════════ */
+main.layout {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 320px 1fr 380px;
+  gap: 0;
+}
+
+.sidebar-left, .sidebar-right {
+  background: rgba(10, 17, 25, 0.4);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sidebar-right {
+  border-right: none; border-left: 1px solid var(--line);
+}
+
+.center-col {
+  display: flex; flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Section common */
+.section {
+  border-bottom: 1px solid var(--line);
+}
+.section-head {
+  padding: 12px 16px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: rgba(5, 8, 16, 0.4);
+  border-bottom: 1px solid var(--line);
+}
+.section-head h2 {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.18em; color: var(--ink-mute);
+  text-transform: uppercase; font-weight: 600;
+}
+.section-head .tag {
+  font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.14em; color: var(--ink-dim);
+  padding: 2px 7px; border: 1px solid var(--line);
+  border-radius: 3px; text-transform: uppercase;
+}
+.section-body { padding: 12px 14px; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LEFT SIDEBAR — Chaos actions + scenarios
+   ═══════════════════════════════════════════════════════════════════════ */
+.action-tabs {
+  display: flex; padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(5, 8, 16, 0.3);
+}
+.action-tab {
+  padding: 10px 14px;
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-mute);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all 0.15s;
+}
+.action-tab.active {
+  color: var(--ink); border-bottom-color: var(--alert);
+}
+.action-tab:hover:not(.active) { color: var(--ink-soft); }
+
+.action-list { padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.chaos-action {
+  background: var(--bg-card); border: 1px solid var(--line);
+  border-left: 3px solid var(--alert-soft);
+  border-radius: 5px; padding: 10px 12px;
+  cursor: pointer; transition: all 0.15s;
+  text-align: left; position: relative;
+}
+.chaos-action:hover:not(:disabled) {
+  background: var(--bg-elev); border-left-color: var(--alert);
+  transform: translateX(3px);
+}
+.chaos-action:disabled { cursor: not-allowed; }
+.chaos-action.running {
+  border-left-color: var(--warn);
+  background: var(--warn-soft);
+  animation: action-running 1.5s ease-in-out infinite;
+}
+@keyframes action-running {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(244, 185, 66, 0); }
+  50%      { box-shadow: 0 0 0 4px rgba(244, 185, 66, 0.18); }
+}
+.chaos-action .ca-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.chaos-action .ca-name {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--ink); font-weight: 600; letter-spacing: 0.05em;
+}
+.chaos-action .ca-icon {
+  font-size: 14px; opacity: 0.85;
+}
+.chaos-action .ca-desc {
+  font-size: 11px; color: var(--ink-mute); line-height: 1.5;
+}
+.chaos-action .ca-pick {
+  display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px;
+}
+.chaos-action .ca-pick label {
+  font-family: var(--font-mono); font-size: 9px;
+  padding: 2px 6px; border: 1px solid var(--line);
+  border-radius: 3px; color: var(--ink-mute);
+  cursor: pointer; transition: all 0.12s;
+}
+.chaos-action .ca-pick input[type="radio"] { display: none; }
+.chaos-action .ca-pick input[type="radio"]:checked + label {
+  background: var(--alert-soft); color: var(--alert);
+  border-color: var(--alert);
+}
+
+/* Scenarios */
+.scenario-card {
+  background: linear-gradient(135deg, var(--bg-elev), var(--bg-card));
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--purple);
+  border-radius: 5px; padding: 12px;
+  cursor: pointer; transition: all 0.18s;
+  margin-bottom: 8px;
+}
+.scenario-card:hover:not(:disabled) {
+  border-color: var(--purple); transform: translateX(3px);
+  box-shadow: 0 4px 14px rgba(180, 108, 214, 0.18);
+}
+.scenario-card .sc-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.scenario-card .sc-icon { font-size: 18px; }
+.scenario-card .sc-name {
+  font-family: var(--font-head); font-size: 13px; color: var(--ink);
+  letter-spacing: 0.04em; font-weight: 600;
+}
+.scenario-card .sc-duration {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--ink-dim); padding: 2px 6px;
+  border: 1px solid var(--line); border-radius: 3px;
+}
+.scenario-card .sc-desc {
+  font-size: 11px; color: var(--ink-mute); line-height: 1.55;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CENTER COLUMN — Architecture diagram + service tiles + charts
+   ═══════════════════════════════════════════════════════════════════════ */
+.arch-section {
+  flex: 0 0 auto;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--line);
+  background:
+    radial-gradient(ellipse at 50% 20%, rgba(106, 177, 242, 0.04), transparent 60%),
+    transparent;
+}
+.arch-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.arch-head h2 {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--ink-mute); letter-spacing: 0.18em;
+  text-transform: uppercase; font-weight: 600;
+}
+.arch-head .t-anchor {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--ink); letter-spacing: 0.05em;
+  padding: 3px 10px; border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.arch-head .t-anchor.live {
+  color: var(--alert); border-color: var(--alert);
+  background: var(--alert-soft);
+  animation: anchor-pulse 1.2s ease-in-out infinite;
+}
+@keyframes anchor-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+.arch-svg-wrap {
+  width: 100%; aspect-ratio: 16/6;
+  max-height: 240px;
+  position: relative;
+}
+.arch-svg-wrap svg { width: 100%; height: 100%; }
+
+/* Architecture nodes */
+.arch-node-rect {
+  fill: var(--bg-card);
+  stroke: var(--line-mid);
+  stroke-width: 1.5;
+  transition: all 0.25s;
+}
+.arch-node-rect.healthy { stroke: var(--health); }
+.arch-node-rect.degraded { stroke: var(--warn); animation: arch-degraded 1.4s ease-in-out infinite; }
+.arch-node-rect.down { stroke: var(--alert); animation: arch-down 0.8s ease-in-out infinite; }
+@keyframes arch-degraded {
+  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+  50% { filter: drop-shadow(0 0 6px rgba(244, 185, 66, 0.6)); }
+}
+@keyframes arch-down {
+  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+  50% { filter: drop-shadow(0 0 8px rgba(255, 71, 87, 0.8)); }
+}
+.arch-node-label {
+  font-family: var(--font-mono); font-size: 10px;
+  fill: var(--ink); letter-spacing: 0.04em;
+}
+.arch-node-replicas {
+  font-family: var(--font-mono); font-size: 9px;
+  fill: var(--ink-mute);
+}
+.arch-edge {
+  stroke: var(--line-bright); stroke-width: 1.5;
+  fill: none; transition: all 0.25s;
+}
+.arch-edge.broken { stroke: var(--alert); stroke-dasharray: 4 3; animation: edge-broken 1s linear infinite; }
+@keyframes edge-broken {
+  to { stroke-dashoffset: -14; }
+}
+.arch-edge.warn { stroke: var(--warn); }
+.arch-traffic-dot {
+  fill: var(--info);
+  animation: traffic-flow 2.4s linear infinite;
+}
+@keyframes traffic-flow {
+  to { offset-distance: 100%; }
+}
+
+/* Service tiles grid */
+.tiles-section {
+  flex: 0 0 auto;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.tiles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+.svc-tile {
+  background: var(--bg-card); border: 1px solid var(--line);
+  border-radius: 6px; padding: 12px;
+  transition: all 0.25s;
+  position: relative;
+  overflow: hidden;
+}
+.svc-tile::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--health); transition: all 0.3s;
+}
+.svc-tile.healthy::before { background: var(--health); }
+.svc-tile.degraded::before { background: var(--warn); }
+.svc-tile.down::before { background: var(--alert); animation: tile-down-bar 0.8s linear infinite; }
+@keyframes tile-down-bar {
+  0%, 100% { box-shadow: 2px 0 8px var(--alert-glow); }
+  50% { box-shadow: 2px 0 2px var(--alert-glow); }
+}
+
+.svc-tile .st-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.svc-tile .st-name {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  color: var(--ink); letter-spacing: 0.05em;
+}
+.svc-tile .st-replicas {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--ink-mute); letter-spacing: 0.06em;
+}
+.svc-tile .st-pods {
+  display: flex; gap: 3px; margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.svc-tile .pod {
+  width: 12px; height: 12px; border-radius: 2px;
+  background: var(--health); cursor: pointer;
+  transition: all 0.15s;
+}
+.svc-tile .pod:hover { transform: scale(1.3); }
+.svc-tile .pod.pending { background: var(--info); animation: pod-blink 0.8s ease-in-out infinite; }
+.svc-tile .pod.terminating { background: var(--warn); animation: pod-blink 0.5s ease-in-out infinite; }
+.svc-tile .pod.notready { background: var(--alert); }
+@keyframes pod-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.svc-tile .st-metrics {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  margin-bottom: 8px;
+}
+.svc-tile .st-metric { display: flex; flex-direction: column; gap: 1px; }
+.svc-tile .st-metric .lab {
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--ink-dim); letter-spacing: 0.1em; text-transform: uppercase;
+}
+.svc-tile .st-metric .val {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+  color: var(--ink);
+}
+.svc-tile .st-metric .val.warn { color: var(--warn); }
+.svc-tile .st-metric .val.crit { color: var(--alert); }
+.svc-tile .st-metric .val.good { color: var(--health); }
+.svc-tile .sparkline {
+  width: 100%; height: 28px; display: block;
+}
+
+/* Charts panel */
+.charts-section {
+  flex: 1 1 auto; min-height: 0;
+  padding: 14px 20px;
+  display: flex; flex-direction: column;
+}
+.charts-tabs {
+  display: flex; gap: 4px; margin-bottom: 8px;
+}
+.chart-tab {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 6px 12px; border-radius: 4px;
+  color: var(--ink-mute); transition: all 0.15s;
+  border: 1px solid transparent;
+}
+.chart-tab:hover { color: var(--ink-soft); background: var(--bg-hover); }
+.chart-tab.active {
+  background: var(--bg-card); color: var(--ink);
+  border-color: var(--line-mid);
+}
+.chart-area {
+  flex: 1; background: var(--bg-card);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 14px; position: relative;
+  min-height: 180px;
+}
+.chart-area canvas { width: 100% !important; height: 100% !important; display: block; }
+.chart-legend {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--ink-mute); margin-top: 8px;
+  padding: 6px 12px;
+}
+.chart-legend .lg {
+  display: flex; align-items: center; gap: 5px;
+}
+.chart-legend .lg .swatch {
+  width: 10px; height: 3px; border-radius: 1px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RIGHT SIDEBAR — Timeline + Educational panel
+   ═══════════════════════════════════════════════════════════════════════ */
+.timeline-section { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.timeline-filters {
+  display: flex; gap: 6px; padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(5, 8, 16, 0.3);
+  flex-wrap: wrap;
+}
+.timeline-filters .filter-pill {
+  font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 4px 9px; border-radius: 3px;
+  color: var(--ink-mute); border: 1px solid var(--line);
+  transition: all 0.12s;
+}
+.timeline-filters .filter-pill:hover { color: var(--ink-soft); }
+.timeline-filters .filter-pill.active {
+  color: var(--ink); border-color: var(--ink-dim);
+  background: var(--bg-elev);
+}
+.timeline-search {
+  display: flex; padding: 8px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.timeline-search input {
+  flex: 1; background: var(--bg-card);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 6px 10px; color: var(--ink);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.timeline-search input::placeholder { color: var(--ink-dim); }
+.timeline-search input:focus { border-color: var(--ink-dim); }
+
+.timeline {
+  flex: 1; overflow-y: auto;
+  padding: 0;
+}
+.tl-entry {
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(31, 44, 58, 0.6);
+  display: grid; grid-template-columns: 50px auto 1fr;
+  gap: 8px; align-items: start;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  animation: tl-slide 0.25s ease-out;
+}
+@keyframes tl-slide {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.tl-entry .tl-ts {
+  color: var(--ink-dim); font-size: 10px;
+}
+.tl-entry .tl-kind {
+  font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-dim); padding: 2px 5px;
+  border: 1px solid var(--line); border-radius: 2px;
+  text-align: center; height: fit-content;
+}
+.tl-entry .tl-kind.k8s { color: var(--info); border-color: rgba(106, 177, 242, 0.3); }
+.tl-entry .tl-kind.probe { color: var(--warn); border-color: rgba(244, 185, 66, 0.3); }
+.tl-entry .tl-kind.action { color: var(--alert); border-color: rgba(255, 71, 87, 0.3); }
+.tl-entry .tl-kind.narration { color: var(--success); border-color: rgba(76, 201, 160, 0.3); }
+.tl-entry .tl-kind.scenario { color: var(--purple); border-color: rgba(180, 108, 214, 0.3); }
+.tl-entry .tl-kind.log { color: var(--ink-mute); }
+.tl-entry .tl-msg { color: var(--ink); }
+.tl-entry.crit .tl-msg { color: var(--crit); }
+.tl-entry.warn .tl-msg { color: var(--warn); }
+.tl-entry.success .tl-msg { color: var(--success); }
+
+.tl-empty {
+  padding: 40px 20px;
+  text-align: center; color: var(--ink-dim);
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em;
+}
+
+/* Narration overlay */
+.narration-banner {
+  margin: 10px 14px;
+  background: linear-gradient(135deg, var(--bg-elev), var(--bg-card));
+  border: 1px solid var(--success);
+  border-left: 3px solid var(--success);
+  border-radius: 5px; padding: 10px 14px;
+}
+.narration-banner .nb-head {
+  font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.18em; color: var(--success);
+  text-transform: uppercase; margin-bottom: 8px;
+}
+.narration-banner .nb-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 11px; color: var(--ink-mute);
+  margin: 4px 0;
+  font-family: var(--font-mono); line-height: 1.5;
+}
+.narration-banner .nb-item .nb-mark {
+  flex-shrink: 0;
+  width: 14px; text-align: center; color: var(--ink-dim);
+  margin-top: 1px;
+}
+.narration-banner .nb-item.matched { color: var(--ink); }
+.narration-banner .nb-item.matched .nb-mark { color: var(--success); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FLOATING PANELS (Educational "what just happened")
+   ═══════════════════════════════════════════════════════════════════════ */
+.edu-panel-bg {
+  position: fixed; inset: 0; background: rgba(5, 8, 16, 0.6);
+  z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.25s;
+  backdrop-filter: blur(3px);
+}
+.edu-panel-bg.open { opacity: 1; pointer-events: auto; }
+.edu-panel {
+  position: fixed; top: 60px; right: 12px; bottom: 12px;
+  width: 480px; max-width: calc(100vw - 24px);
+  background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg) 100%);
+  border: 1px solid var(--line-mid); border-radius: 8px;
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.5);
+  z-index: 100; transform: translateX(110%);
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.edu-panel.open { transform: translateX(0); }
+.edu-panel .ep-head {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--bg-elev), transparent);
+}
+.edu-panel .ep-kicker {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.18em; color: var(--success);
+  text-transform: uppercase; margin-bottom: 4px;
+}
+.edu-panel .ep-title {
+  font-family: var(--font-head); font-size: 22px;
+  color: var(--ink); letter-spacing: 0.03em; margin-bottom: 8px;
+}
+.edu-panel .ep-summary {
+  font-size: 13px; color: var(--ink-soft); line-height: 1.6;
+}
+.edu-panel .ep-body {
+  flex: 1; overflow-y: auto; padding: 16px 22px 24px;
+}
+.edu-panel .ep-section {
+  margin-bottom: 22px;
+}
+.edu-panel .ep-section h3 {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.18em; color: var(--ink-mute);
+  text-transform: uppercase; margin-bottom: 10px;
+  font-weight: 600;
+}
+.edu-panel ol.ep-steps {
+  list-style: none;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.edu-panel .ep-step {
+  display: flex; gap: 12px;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-radius: 5px; padding: 10px 12px;
+  position: relative;
+}
+.edu-panel .ep-step .ep-step-num {
+  flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--bg-card); border: 1px solid var(--line-bright);
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--ink-mute); font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+}
+.edu-panel .ep-step .ep-step-text {
+  font-size: 12px; color: var(--ink-soft); line-height: 1.6;
+}
+.edu-panel .ep-prim {
+  display: grid; grid-template-columns: 140px 1fr; gap: 10px 14px;
+  font-size: 11px;
+}
+.edu-panel .ep-prim b {
+  font-family: var(--font-mono); color: var(--warn);
+  font-weight: 600; letter-spacing: 0.04em;
+}
+.edu-panel .ep-prim span { color: var(--ink-soft); line-height: 1.55; }
+.edu-panel .ep-links {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.edu-panel .ep-links a {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--info); text-decoration: none;
+  padding: 4px 8px; border-radius: 3px;
+  transition: all 0.15s;
+}
+.edu-panel .ep-links a:hover {
+  background: var(--info-soft); color: var(--ink);
+}
+.edu-panel .ep-takeaway {
+  background: linear-gradient(135deg, rgba(76, 201, 160, 0.07), rgba(106, 177, 242, 0.05));
+  border: 1px solid var(--success); border-left: 3px solid var(--success);
+  border-radius: 5px; padding: 14px 16px;
+  font-style: italic; color: var(--ink); font-size: 13px; line-height: 1.6;
+}
+.edu-panel .ep-close {
+  position: absolute; top: 12px; right: 12px;
+  width: 32px; height: 32px;
+  border-radius: 4px; color: var(--ink-mute);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  cursor: pointer; transition: all 0.15s;
+  font-size: 14px;
+}
+.edu-panel .ep-close:hover { color: var(--ink); border-color: var(--ink-dim); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TOAST / SETTINGS / TOUR
+   ═══════════════════════════════════════════════════════════════════════ */
+.toast-stack {
+  position: fixed; top: 64px; right: 16px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 80;
+  pointer-events: none;
+}
+.toast {
+  background: var(--bg-card); border: 1px solid var(--line);
+  border-left: 3px solid var(--info);
+  border-radius: 5px; padding: 10px 14px;
+  font-size: 12px; color: var(--ink);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 240px; max-width: 360px;
+  animation: toast-in 0.2s ease-out;
+  pointer-events: auto;
+}
+.toast.warn { border-left-color: var(--warn); }
+.toast.crit { border-left-color: var(--alert); }
+.toast.success { border-left-color: var(--success); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Settings popover */
+.settings-pop {
+  position: absolute; right: 12px; top: 56px;
+  background: var(--bg-card); border: 1px solid var(--line-mid);
+  border-radius: 6px; padding: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  z-index: 60; min-width: 240px;
+  display: none;
+}
+.settings-pop.open { display: block; }
+.settings-pop h3 {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.16em; color: var(--ink-mute);
+  text-transform: uppercase; margin-bottom: 10px;
+}
+.settings-pop .setting {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0;
+  font-size: 12px; color: var(--ink);
+}
+.settings-pop .setting label { cursor: pointer; }
+.settings-pop .toggle {
+  width: 32px; height: 18px;
+  background: var(--bg-deep);
+  border: 1px solid var(--line-mid);
+  border-radius: 10px;
+  position: relative;
+  transition: all 0.18s;
+  cursor: pointer;
+}
+.settings-pop .toggle::after {
+  content: ""; position: absolute;
+  top: 2px; left: 2px;
+  width: 12px; height: 12px;
+  border-radius: 50%; background: var(--ink-mute);
+  transition: all 0.18s;
+}
+.settings-pop .toggle.on { background: var(--success); border-color: var(--success); }
+.settings-pop .toggle.on::after { left: 16px; background: var(--bg-deep); }
+
+/* Presentation mode: hide non-essential chrome, enlarge typography */
+body.presentation .navbar .stats { display: none; }
+body.presentation .sidebar-left, body.presentation .sidebar-right {
+  display: none;
+}
+body.presentation main.layout { grid-template-columns: 1fr; }
+body.presentation .arch-section { padding: 28px 36px; }
+body.presentation .arch-svg-wrap { max-height: 400px; aspect-ratio: 16/5; }
+body.presentation .tiles-section, body.presentation .charts-section {
+  padding: 18px 36px;
+}
+body.presentation .svc-tile .st-name { font-size: 14px; }
+body.presentation .svc-tile .st-metric .val { font-size: 17px; }
+
+/* Tour overlay */
+.tour-bg {
+  position: fixed; inset: 0; background: rgba(5, 8, 16, 0.75);
+  z-index: 200; display: none;
+  backdrop-filter: blur(4px);
+}
+.tour-bg.open { display: flex; align-items: center; justify-content: center; }
+.tour-card {
+  background: var(--bg-card); border: 1px solid var(--line-mid);
+  border-radius: 10px; padding: 30px 36px;
+  max-width: 520px; box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  text-align: center;
+}
+.tour-card h1 {
+  font-family: var(--font-head); font-size: 28px;
+  color: var(--ink); letter-spacing: 0.1em; margin-bottom: 6px;
+}
+.tour-card .tour-sub {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--alert); letter-spacing: 0.16em;
+  text-transform: uppercase; margin-bottom: 18px;
+}
+.tour-card p {
+  color: var(--ink-soft); line-height: 1.7; font-size: 14px;
+  margin-bottom: 12px;
+}
+.tour-card .btn {
+  margin-top: 18px;
+  padding: 12px 32px;
+  background: var(--alert); color: var(--bg-deep);
+  font-family: var(--font-head); font-size: 13px;
+  letter-spacing: 0.12em; font-weight: 600;
+  border-radius: 4px;
+  box-shadow: 0 0 16px var(--alert-glow);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-mid); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-dim); }
+
+/* Responsive */
+@media (max-width: 1280px) {
+  main.layout { grid-template-columns: 280px 1fr 320px; }
+}
+@media (max-width: 1080px) {
+  main.layout { grid-template-columns: 1fr; }
+  .sidebar-left, .sidebar-right { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="navbar">
+  <div class="brand"><span class="dot"></span>CHAOS_THEATER</div>
+  <div class="tagline">live resilience demonstration</div>
+  <div class="stats">
+    <span class="stat" id="stat-events"><b>0</b> events</span>
+    <span class="stat" id="stat-actions"><b>0</b> chaos events</span>
+    <span class="stat" id="stat-uptime"><b>100%</b> avg uptime</span>
+  </div>
+  <div class="conn" id="conn"><span class="pip"></span><span id="conn-text">connecting...</span></div>
+  <div class="actions">
+    <button class="icon-btn" id="btn-tour" title="Tour">?</button>
+    <button class="icon-btn" id="btn-sound" title="Sound effects">&#9834;</button>
+    <button class="icon-btn" id="btn-present" title="Presentation mode">&#11036;</button>
+    <button class="icon-btn" id="btn-settings" title="Settings">&#9881;</button>
+  </div>
+  <div class="settings-pop" id="settings-pop">
+    <h3>Settings</h3>
+    <div class="setting"><label for="set-narration">Show narration banner</label><div class="toggle on" id="set-narration"></div></div>
+    <div class="setting"><label for="set-edu">Open educational panel after action</label><div class="toggle on" id="set-edu"></div></div>
+    <div class="setting"><label for="set-anim">Architecture animations</label><div class="toggle on" id="set-anim"></div></div>
+    <div class="setting"><label for="set-sound">Sound effects</label><div class="toggle" id="set-sound"></div></div>
+    <div class="setting"><label>Mode</label><span id="setting-mode" style="font-family:var(--font-mono);font-size:10px;color:var(--ink-mute);">?</span></div>
+  </div>
+</header>
+
+<main class="layout">
+
+  <aside class="sidebar-left">
+    <div class="action-tabs">
+      <button class="action-tab active" data-tab="actions">&#9889; Actions</button>
+      <button class="action-tab" data-tab="scenarios">&#9654; Scenarios</button>
+    </div>
+    <div class="action-list" id="tab-actions"></div>
+    <div class="action-list" id="tab-scenarios" style="display:none;"></div>
+  </aside>
+
+  <section class="center-col">
+
+    <div class="arch-section">
+      <div class="arch-head">
+        <h2>SYSTEM ARCHITECTURE</h2>
+        <span class="t-anchor" id="t-anchor">idle</span>
+      </div>
+      <div class="arch-svg-wrap" id="arch-wrap">
+        <svg id="arch-svg" viewBox="0 0 1000 320" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+
+    <div class="tiles-section">
+      <div class="section-head" style="padding:0 0 8px;background:none;border:none;">
+        <h2>SERVICE HEALTH</h2>
+        <span class="tag" id="tile-count">0 services</span>
+      </div>
+      <div class="tiles-grid" id="tiles-grid"></div>
+    </div>
+
+    <div class="charts-section">
+      <div class="charts-tabs">
+        <button class="chart-tab active" data-metric="latency">p95 Latency</button>
+        <button class="chart-tab" data-metric="rps">Requests/sec</button>
+        <button class="chart-tab" data-metric="errors">Error Rate</button>
+        <button class="chart-tab" data-metric="replicas">Replicas Ready</button>
+      </div>
+      <div class="chart-area"><canvas id="metric-canvas"></canvas></div>
+      <div class="chart-legend" id="chart-legend"></div>
+    </div>
+
+  </section>
+
+  <aside class="sidebar-right">
+    <div class="timeline-section">
+      <div class="section-head">
+        <h2>RECOVERY TIMELINE</h2>
+        <span class="tag" id="tl-count">0</span>
+      </div>
+      <div class="narration-banner" id="narration" style="display:none;">
+        <div class="nb-head">PREDICTED VS. OBSERVED</div>
+        <div id="narration-items"></div>
+      </div>
+      <div class="timeline-filters" id="filters"></div>
+      <div class="timeline-search">
+        <input type="text" id="search" placeholder="filter timeline...">
+      </div>
+      <div class="timeline" id="timeline">
+        <div class="tl-empty">trigger a chaos action to begin</div>
+      </div>
+    </div>
+  </aside>
+
+</main>
+
+<div class="edu-panel-bg" id="edu-bg"></div>
+<aside class="edu-panel" id="edu-panel">
+  <button class="ep-close" id="edu-close">&#10005;</button>
+  <div class="ep-head">
+    <div class="ep-kicker">WHAT JUST HAPPENED</div>
+    <div class="ep-title" id="ep-title">--</div>
+    <div class="ep-summary" id="ep-summary">--</div>
+  </div>
+  <div class="ep-body">
+    <div class="ep-section"><h3>Step by step</h3><ol class="ep-steps" id="ep-steps"></ol></div>
+    <div class="ep-section"><h3>K8s / SRE primitives that responded</h3><div class="ep-prim" id="ep-prim"></div></div>
+    <div class="ep-section"><h3>Learn more</h3><div class="ep-links" id="ep-links"></div></div>
+    <div class="ep-takeaway" id="ep-takeaway">--</div>
+  </div>
+</aside>
+
+<div class="toast-stack" id="toasts"></div>
+
+<div class="tour-bg" id="tour-bg">
+  <div class="tour-card">
+    <h1>CHAOS_THEATER</h1>
+    <div class="tour-sub">trigger real failures &middot; watch real recovery</div>
+    <p>This dashboard lets you trigger failure scenarios against a microservices platform and watch the system recover in real time. Every event on the right is a real Kubernetes recovery action: readiness probes, replicasets, circuit breakers, autoscalers, all working as designed.</p>
+    <p>Click an <b style="color:var(--alert)">&#9889; Action</b> in the left sidebar to start. Or hit a <b style="color:var(--purple)">&#9654; Scenario</b> to run a pre-built sequence (Black Friday, Region Disaster, Cache Cascade, etc.).</p>
+    <p>After each action completes, the educational panel slides in with a step-by-step breakdown, the K8s primitives that responded, and what to take away.</p>
+    <button class="btn" id="tour-close">START</button>
+  </div>
+</div>
+
+
+<script>
+"use strict";
+
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+const CONTROLLER = (() => {
+  const h = window.location;
+  if (h.port === "8004") return h.origin;
+  if (h.protocol === "file:" || h.hostname === "localhost") return "http://localhost:8004";
+  return h.origin;
+})();
+
+const SERVICES = ["api-gateway", "user-service", "task-service", "notification-service"];
+const SERVICE_HEX = {
+  "api-gateway": "#ff4757",
+  "user-service": "#6ab1f2",
+  "task-service": "#f4b942",
+  "notification-service": "#4cc9a0",
+};
+const CHART_POINTS = 60;
+
+const ACTIONS = [
+  { id: "kill_pod", icon: "&#128128;", name: "Kill Pod", desc: "Delete a running pod. Watch readiness probe + replicaset replace it.", endpoint: "/chaos/kill-pod", needs: "service" },
+  { id: "cpu_pressure", icon: "&#128293;", name: "CPU Pressure", desc: "Saturate CPU. Watch HPA scale replicas to absorb load.", endpoint: "/chaos/cpu-pressure", needs: "service" },
+  { id: "memory_leak", icon: "&#129504;", name: "Memory Leak", desc: "Climb memory until OOM kill. Watch blast contained to one pod.", endpoint: "/chaos/memory-leak", needs: "service" },
+  { id: "network_partition", icon: "&#9940;", name: "Network Partition", desc: "Cut traffic. Watch circuit breaker trip and recover.", endpoint: "/chaos/network-partition", needs: "service" },
+  { id: "slow_network", icon: "&#128012;", name: "Slow Network", desc: "Inject +500ms latency. Watch bulkheads protect critical paths.", endpoint: "/chaos/slow-network", needs: null },
+  { id: "bad_deploy", icon: "&#128163;", name: "Bad Deploy", desc: "Ship broken image. Watch RollingUpdate halt + rollback.", endpoint: "/chaos/bad-deploy", needs: "service" },
+  { id: "redis_failure", icon: "&#128237;", name: "Redis Down", desc: "Kill cache. Watch rate limiter fall back, DB load climb.", endpoint: "/chaos/redis-failure", needs: null },
+  { id: "db_failure", icon: "&#128451;", name: "Database Down", desc: "Kill DB primary. Reads degrade to replicas, writes fail fast.", endpoint: "/chaos/db-failure", needs: null },
+  { id: "expire_jwt", icon: "&#128273;", name: "Rotate JWT", desc: "Rotate signing keys. Watch clients re-auth via refresh flow.", endpoint: "/chaos/expire-jwt", needs: null },
+  { id: "cert_expiry", icon: "&#128220;", name: "Cert Expiry", desc: "TLS expires. Watch cert-manager auto-renew.", endpoint: "/chaos/cert-expiry", needs: null },
+  { id: "dns_failure", icon: "&#128225;", name: "DNS Failure", desc: "Break CoreDNS. Watch NodeLocal DNSCache soften impact.", endpoint: "/chaos/dns-failure", needs: null },
+  { id: "region_outage", icon: "&#128509;", name: "Region Outage", desc: "Mark an AZ NotReady. Watch traffic shift, autoscaler provision.", endpoint: "/chaos/region-outage", needs: null },
+  { id: "cascading_failure", icon: "&#9981;", name: "Cascading Failure", desc: "One service dies, cascade contained by breakers.", endpoint: "/chaos/cascading-failure", needs: null },
+  { id: "disk_full", icon: "&#128190;", name: "Disk Full", desc: "Pod's disk fills up. kubelet evicts under DiskPressure.", endpoint: "/chaos/disk-full", needs: "service" },
+  { id: "gc_pause", icon: "&#128348;", name: "GC Pause", desc: "Long GC pause spikes p99. Outlier detection routes around.", endpoint: "/chaos/gc-pause", needs: "service" },
+  { id: "thundering_herd", icon: "&#128009;", name: "Thundering Herd", desc: "Synchronized retry storm after a brief blip.", endpoint: "/chaos/thundering-herd", needs: null },
+  { id: "noisy_neighbor", icon: "&#128266;", name: "Noisy Neighbor", desc: "A co-tenant pod hogs node CPU.", endpoint: "/chaos/noisy-neighbor", needs: null },
+  { id: "spot_reclaim", icon: "&#128264;", name: "Spot Reclaim", desc: "Cloud takes a spot node back with 30s notice.", endpoint: "/chaos/spot-reclaim", needs: null },
+  { id: "autoscaler_stuck", icon: "&#9203;", name: "Autoscaler Stuck", desc: "Cluster autoscaler can't provision capacity.", endpoint: "/chaos/autoscaler-stuck", needs: null },
+  { id: "api_throttle", icon: "&#128274;", name: "API Throttle", desc: "Misbehaving controller floods kube-apiserver.", endpoint: "/chaos/api-throttle", needs: null },
+  { id: "secret_leak", icon: "&#128272;", name: "Secret Leak", desc: "Credential leaked. Rotate across services live.", endpoint: "/chaos/secret-leak", needs: null },
+  { id: "service_mesh_crash", icon: "&#129523;", name: "Sidecar Crash", desc: "Envoy sidecar OOMs. App keeps running, mesh re-routes.", endpoint: "/chaos/service-mesh-crash", needs: "service" },
+  { id: "third_party_outage", icon: "&#9729;", name: "Third-Party Outage", desc: "External SaaS (Stripe etc.) down. Circuit breaker + queue-replay.", endpoint: "/chaos/third-party-outage", needs: null },
+];
+
+const state = {
+  connected: false, mode: "?", snapshot: null, events: [],
+  perServiceHistory: {},
+  narration: [],
+  filters: { kinds: new Set(["k8s", "action", "narration", "scenario"]), search: "" },
+  currentMetric: "latency",
+  actionInFlight: null, t0: null,
+  explainers: null, lastCompleted: null,
+  settings: { narration: true, edu: true, anim: true, sound: false },
+  audioCtx: null,
+};
+SERVICES.forEach(s => { state.perServiceHistory[s] = { latency: [], rps: [], errors: [], replicas: [] }; });
+
+function escHtml(s) { if (s == null) return ""; return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function el(tag, attrs={}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k === "html") e.innerHTML = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const c of children) { if (c == null) continue; if (typeof c === "string") e.appendChild(document.createTextNode(c)); else e.appendChild(c); }
+  return e;
+}
+function toast(msg, kind = "info") {
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.textContent = msg;
+  $("#toasts").appendChild(t);
+  setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity 0.3s"; }, 3500);
+  setTimeout(() => t.remove(), 3900);
+}
+function beep(freq = 440, dur = 0.08, vol = 0.05) {
+  if (!state.settings.sound) return;
+  try {
+    if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = state.audioCtx;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = freq; o.type = "sine";
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(vol, ctx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+    o.start(); o.stop(ctx.currentTime + dur + 0.02);
+  } catch (e) {}
+}
+
+function renderActions() {
+  const root = $("#tab-actions");
+  root.innerHTML = "";
+  for (const a of ACTIONS) {
+    const card = el("button", { class: "chaos-action", "data-action": a.id });
+    let picks = "";
+    if (a.needs === "service") {
+      picks = '<div class="ca-pick">' + SERVICES.map((s, i) =>
+        `<input type="radio" name="pick-${a.id}" id="pick-${a.id}-${i}" value="${s}" ${i===0?'checked':''}><label for="pick-${a.id}-${i}">${s.replace("-service", "")}</label>`
+      ).join("") + '</div>';
+    }
+    card.innerHTML = `<div class="ca-head"><span class="ca-name">${a.name}</span><span class="ca-icon">${a.icon}</span></div><div class="ca-desc">${a.desc}</div>${picks}`;
+    card.addEventListener("click", e => {
+      if (e.target.tagName === "LABEL" || e.target.tagName === "INPUT") return;
+      triggerAction(a);
+    });
+    root.appendChild(card);
+  }
+}
+function renderScenarios() {
+  const root = $("#tab-scenarios");
+  root.innerHTML = "";
+  const scenarios = state.explainers?.scenarios || {};
+  for (const [id, scn] of Object.entries(scenarios)) {
+    const card = el("button", { class: "scenario-card", "data-scenario": id });
+    card.innerHTML = `<div class="sc-head"><span class="sc-icon">${scn.icon || "&#9654;"}</span><span class="sc-name">${scn.name}</span><span class="sc-duration">~${scn.duration_sec}s</span></div><div class="sc-desc">${scn.description}</div>`;
+    card.addEventListener("click", () => triggerScenario(id));
+    root.appendChild(card);
+  }
+}
+
+async function triggerAction(a) {
+  if (state.actionInFlight) { toast("An action is already running. Wait for recovery.", "warn"); return; }
+  let body = null;
+  if (a.needs === "service") {
+    const sel = document.querySelector(`input[name="pick-${a.id}"]:checked`);
+    body = { service: sel.value };
+  }
+  state.actionInFlight = a.id; state.narration = []; state.t0 = null; state.lastCompleted = null;
+  document.querySelector(`.chaos-action[data-action="${a.id}"]`)?.classList.add("running");
+  try {
+    const r = await fetch(CONTROLLER + a.endpoint, { method: "POST", headers: {"Content-Type":"application/json"}, body: body ? JSON.stringify(body) : "{}" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    beep(440, 0.08, 0.04);
+  } catch (e) {
+    toast("Failed: " + e.message, "crit");
+    document.querySelector(`.chaos-action[data-action="${a.id}"]`)?.classList.remove("running");
+    state.actionInFlight = null;
+  }
+}
+async function triggerScenario(id) {
+  if (state.actionInFlight) { toast("Wait for the current action to complete.", "warn"); return; }
+  state.actionInFlight = "scenario:" + id; state.narration = []; state.t0 = null;
+  try {
+    await fetch(CONTROLLER + "/chaos/scenario", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({id}) });
+    toast("Scenario started: " + (state.explainers?.scenarios[id]?.name || id), "info");
+    beep(523, 0.06, 0.04); setTimeout(() => beep(659, 0.06, 0.04), 90);
+  } catch (e) { toast("Scenario failed: " + e.message, "crit"); state.actionInFlight = null; }
+}
+
+function renderArchitecture() {
+  const svg = $("#arch-svg");
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const NS = "http://www.w3.org/2000/svg";
+  const layout = {
+    "internet": { x: 80, y: 160, label: "INTERNET", isExt: true },
+    "api-gateway": { x: 260, y: 160, label: "api-gateway" },
+    "user-service": { x: 500, y: 60, label: "user-service" },
+    "task-service": { x: 500, y: 160, label: "task-service" },
+    "notification-service": { x: 500, y: 260, label: "notification-service" },
+    "postgres": { x: 750, y: 100, label: "postgres", isExt: true },
+    "redis": { x: 750, y: 220, label: "redis", isExt: true },
+  };
+  const edges = [
+    ["internet", "api-gateway"],
+    ["api-gateway", "user-service"], ["api-gateway", "task-service"], ["api-gateway", "notification-service"],
+    ["user-service", "postgres"], ["user-service", "redis"],
+    ["task-service", "postgres"], ["task-service", "redis"],
+  ];
+  const svgEl = (tag, attrs) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    return e;
+  };
+  for (const [from, to] of edges) {
+    const a = layout[from], b = layout[to];
+    if (!a || !b) continue;
+    const isBroken = edgeBroken(from, to);
+    const path = svgEl("path", { d: `M ${a.x + 60} ${a.y} L ${b.x - 60} ${b.y}`, class: "arch-edge" + (isBroken ? " broken" : "") });
+    svg.appendChild(path);
+    if (!isBroken && state.settings.anim) {
+      const dot = svgEl("circle", { r: 2.5, fill: "var(--info)", class: "arch-traffic-dot" });
+      const anim = svgEl("animateMotion", { dur: "2.4s", repeatCount: "indefinite", path: `M ${a.x + 60} ${a.y} L ${b.x - 60} ${b.y}` });
+      dot.appendChild(anim);
+      svg.appendChild(dot);
+    }
+  }
+  for (const [id, pos] of Object.entries(layout)) {
+    const isService = SERVICES.includes(id);
+    const svc = state.snapshot?.services?.[id];
+    let cls = "healthy";
+    if (svc) cls = !svc.healthy ? "down" : (svc.error_rate > 0.02 ? "degraded" : "healthy");
+    if (pos.isExt) cls = "";
+    const rect = svgEl("rect", { x: pos.x - 60, y: pos.y - 22, width: 120, height: 44, rx: 5, class: "arch-node-rect" + (cls ? " " + cls : "") });
+    if (pos.isExt) rect.setAttribute("stroke-dasharray", "5 3");
+    svg.appendChild(rect);
+    const label = svgEl("text", { x: pos.x, y: pos.y + 3, "text-anchor": "middle", class: "arch-node-label" });
+    label.textContent = pos.label;
+    svg.appendChild(label);
+    if (isService && svc) {
+      const sub = svgEl("text", { x: pos.x, y: pos.y + 16, "text-anchor": "middle", class: "arch-node-replicas" });
+      sub.textContent = `${svc.ready}/${svc.desired} ready`;
+      svg.appendChild(sub);
+    }
+  }
+}
+function edgeBroken(from, to) {
+  if (SERVICES.includes(to)) {
+    const svc = state.snapshot?.services?.[to];
+    return svc && !svc.healthy;
+  }
+  return false;
+}
+
+function renderTiles() {
+  const root = $("#tiles-grid");
+  if (!state.snapshot || !state.snapshot.services) { root.innerHTML = `<div class="tl-empty">awaiting snapshot...</div>`; return; }
+  root.innerHTML = "";
+  for (const [name, s] of Object.entries(state.snapshot.services)) {
+    const cls = !s.healthy ? "down" : (s.error_rate > 0.02 ? "degraded" : "healthy");
+    const latCol = s.latency_p95_ms > 500 ? "crit" : (s.latency_p95_ms > 150 ? "warn" : "good");
+    const errCol = s.error_rate > 0.05 ? "crit" : (s.error_rate > 0.01 ? "warn" : "good");
+    const tile = el("div", { class: "svc-tile " + cls });
+    const podPips = s.pods.map(p => {
+      const c = p.phase === "Terminating" ? "terminating" : (p.phase === "Pending" || p.phase === "ContainerCreating") ? "pending" : !p.ready ? "notready" : "";
+      return `<div class="pod ${c}" title="${escHtml(p.name)} (${p.phase}${p.ready?'':' / not ready'})"></div>`;
+    }).join("");
+    tile.innerHTML = `<div class="st-head"><span class="st-name" style="color:${SERVICE_HEX[name] || 'var(--ink)'}">${name}</span><span class="st-replicas">${s.ready}/${s.desired} ready</span></div><div class="st-pods">${podPips}</div><div class="st-metrics"><div class="st-metric"><span class="lab">p95</span><span class="val ${latCol}">${Math.round(s.latency_p95_ms)}ms</span></div><div class="st-metric"><span class="lab">rps</span><span class="val">${Math.round(s.rps)}</span></div><div class="st-metric"><span class="lab">err</span><span class="val ${errCol}">${(s.error_rate*100).toFixed(2)}%</span></div></div><svg class="sparkline" id="spark-${name}" viewBox="0 0 200 30" preserveAspectRatio="none"></svg>`;
+    root.appendChild(tile);
+    drawSparkline(`spark-${name}`, state.perServiceHistory[name]?.latency || [], { color: SERVICE_HEX[name], minMax: 50 });
+  }
+  $("#tile-count").textContent = `${Object.keys(state.snapshot.services).length} services`;
+}
+function drawSparkline(id, points, opts) {
+  const svg = document.getElementById(id);
+  if (!svg) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  if (points.length < 2) return;
+  const max = Math.max(opts.minMax || 50, ...points) * 1.1;
+  const w = 200, h = 30;
+  let d = "";
+  for (let i = 0; i < points.length; i++) {
+    const x = (i / (points.length - 1)) * w;
+    const y = h - (points[i] / max) * (h - 4) - 2;
+    d += (i === 0 ? "M" : " L") + " " + x.toFixed(1) + " " + y.toFixed(1);
+  }
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", d);
+  path.setAttribute("stroke", opts.color || "var(--info)");
+  path.setAttribute("stroke-width", "1.5");
+  path.setAttribute("fill", "none");
+  svg.appendChild(path);
+  const lastX = w, lastY = h - (points[points.length-1] / max) * (h-4) - 2;
+  const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  dot.setAttribute("cx", lastX); dot.setAttribute("cy", lastY); dot.setAttribute("r", "2");
+  dot.setAttribute("fill", opts.color || "var(--info)");
+  svg.appendChild(dot);
+}
+
+function pushMetricPoint() {
+  if (!state.snapshot || !state.snapshot.services) return;
+  for (const [name, s] of Object.entries(state.snapshot.services)) {
+    const h = state.perServiceHistory[name]; if (!h) continue;
+    h.latency.push(s.latency_p95_ms);
+    h.rps.push(s.rps);
+    h.errors.push(s.error_rate * 100);
+    h.replicas.push(s.ready);
+    for (const k of ["latency", "rps", "errors", "replicas"]) if (h[k].length > CHART_POINTS) h[k].shift();
+  }
+}
+function drawMainChart() {
+  const canvas = $("#metric-canvas");
+  const wrap = canvas.parentElement;
+  const W = wrap.clientWidth - 28;
+  const H = wrap.clientHeight - 28;
+  if (W <= 0 || H <= 0) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "rgba(255,255,255,0.04)"; ctx.lineWidth = 1;
+  for (let i = 1; i <= 4; i++) { const y = (H / 5) * i; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  for (let i = 1; i <= 6; i++) { const x = (W / 6) * i; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  const metric = state.currentMetric;
+  const minMax = { latency: 150, rps: 100, errors: 1, replicas: 5 }[metric];
+  let max = minMax;
+  for (const name of SERVICES) {
+    const points = state.perServiceHistory[name]?.[metric] || [];
+    if (points.length) max = Math.max(max, ...points);
+  }
+  max = max * 1.1;
+  for (const name of SERVICES) {
+    const points = state.perServiceHistory[name]?.[metric] || [];
+    if (points.length < 2) continue;
+    ctx.strokeStyle = SERVICE_HEX[name]; ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    for (let i = 0; i < points.length; i++) {
+      const x = (i / (CHART_POINTS - 1)) * W;
+      const y = H - (points[i] / max) * (H - 8) - 4;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(138,150,166,0.6)";
+  ctx.font = "10px JetBrains Mono, monospace";
+  const fmt = { latency: v => Math.round(v) + "ms", rps: v => Math.round(v), errors: v => v.toFixed(1) + "%", replicas: v => v.toFixed(0) }[metric];
+  ctx.fillText(fmt(max), W - 50, 12);
+  ctx.fillText(fmt(0), W - 12, H - 4);
+  ctx.fillText(fmt(max/2), W - 50, H/2 + 4);
+}
+function renderChartLegend() {
+  const root = $("#chart-legend");
+  root.innerHTML = "";
+  for (const name of SERVICES) {
+    const lg = el("div", { class: "lg" });
+    lg.innerHTML = `<span class="swatch" style="background:${SERVICE_HEX[name]}"></span>${name}`;
+    root.appendChild(lg);
+  }
+}
+
+function renderTimeline() {
+  const root = $("#timeline");
+  const events = state.events.filter(matchesFilter);
+  if (events.length === 0) { root.innerHTML = `<div class="tl-empty">no events match filters</div>`; $("#tl-count").textContent = "0"; return; }
+  root.innerHTML = "";
+  $("#tl-count").textContent = events.length;
+  for (const ev of events.slice(0, 200)) {
+    const tsRel = state.t0 ? (ev.ts - state.t0) : null;
+    const tsStr = tsRel !== null && tsRel >= 0 ? `T+${tsRel.toFixed(1)}s` : new Date(ev.ts * 1000).toLocaleTimeString([], { hour12: false });
+    let msg = "";
+    if (ev.kind === "k8s") msg = ev.payload.message || "";
+    else if (ev.kind === "action") msg = ev.payload.completed ? `action complete (${ev.payload.duration_sec}s total)` : `${ev.payload.action} initiated`;
+    else if (ev.kind === "narration") msg = ev.payload.text;
+    else if (ev.kind === "scenario") msg = ev.payload.started ? `scenario started: ${ev.payload.name}` : `scenario complete: ${ev.payload.name}`;
+    else if (ev.kind === "log") msg = ev.payload.msg || JSON.stringify(ev.payload);
+    else continue;
+    const div = el("div", { class: "tl-entry " + (ev.level || "info") });
+    div.innerHTML = `<span class="tl-ts">${tsStr}</span><span class="tl-kind ${ev.kind}">${ev.kind}</span><span class="tl-msg">${escHtml(msg)}</span>`;
+    root.appendChild(div);
+  }
+}
+function matchesFilter(ev) {
+  if (!state.filters.kinds.has(ev.kind)) return false;
+  if (state.filters.search) {
+    const s = state.filters.search.toLowerCase();
+    const haystack = JSON.stringify(ev.payload).toLowerCase();
+    if (!haystack.includes(s)) return false;
+  }
+  return true;
+}
+function renderFilters() {
+  const root = $("#filters");
+  const kinds = [["k8s", "K8s"], ["action", "Action"], ["narration", "Narration"], ["scenario", "Scenario"], ["log", "Log"]];
+  root.innerHTML = "";
+  for (const [k, label] of kinds) {
+    const btn = el("button", { class: "filter-pill" + (state.filters.kinds.has(k) ? " active" : "") });
+    btn.textContent = label;
+    btn.addEventListener("click", () => {
+      if (state.filters.kinds.has(k)) state.filters.kinds.delete(k); else state.filters.kinds.add(k);
+      renderFilters(); renderTimeline();
+    });
+    root.appendChild(btn);
+  }
+}
+
+function renderNarration() {
+  const root = $("#narration");
+  const items = $("#narration-items");
+  if (!state.settings.narration || state.narration.length === 0) { root.style.display = "none"; return; }
+  root.style.display = "block";
+  items.innerHTML = state.narration.map(n =>
+    `<div class="nb-item ${n.matched ? 'matched' : ''}"><span class="nb-mark">${n.matched ? '&check;' : '&cir;'}</span><span>${escHtml(n.text)}</span></div>`
+  ).join("");
+}
+
+function openEduPanel(actionId) {
+  const data = state.explainers?.actions?.[actionId];
+  if (!data) return;
+  $("#ep-title").textContent = data.title;
+  $("#ep-summary").textContent = data.summary;
+  $("#ep-steps").innerHTML = data.what_happens.map((s, i) =>
+    `<li class="ep-step"><span class="ep-step-num">${i+1}</span><span class="ep-step-text">${escHtml(s)}</span></li>`
+  ).join("");
+  $("#ep-prim").innerHTML = data.primitives.map(([name, desc]) =>
+    `<b>${escHtml(name)}</b><span>${escHtml(desc)}</span>`
+  ).join("");
+  $("#ep-links").innerHTML = data.learn_more.map(([label, url]) =>
+    `<a href="${url}" target="_blank" rel="noopener">&rarr; ${escHtml(label)}</a>`
+  ).join("");
+  $("#ep-takeaway").textContent = data.takeaway;
+  $("#edu-bg").classList.add("open");
+  $("#edu-panel").classList.add("open");
+}
+function closeEduPanel() {
+  $("#edu-bg").classList.remove("open");
+  $("#edu-panel").classList.remove("open");
+}
+
+let es = null, reconnectTimer = null;
+function connect() {
+  if (es) es.close();
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  es = new EventSource(CONTROLLER + "/stream");
+  es.onopen = () => {
+    state.connected = true;
+    $("#conn").classList.add("live");
+    $("#conn").classList.remove("disconnected");
+    $("#conn-text").textContent = "connected";
+  };
+  es.onerror = () => {
+    state.connected = false;
+    $("#conn").classList.remove("live");
+    $("#conn").classList.add("disconnected");
+    $("#conn-text").textContent = "disconnected - retry in 3s";
+    if (es) es.close();
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+  es.onmessage = e => {
+    try { handleEvent(JSON.parse(e.data)); } catch (err) { console.warn("bad event", e.data); }
+  };
+}
+function handleEvent(ev) {
+  const { kind, payload } = ev;
+  if (kind === "metric" && payload.snapshot) {
+    state.snapshot = payload.snapshot;
+    state.mode = payload.snapshot.mode || state.mode;
+    $("#setting-mode").textContent = state.mode;
+    renderArchitecture(); renderTiles(); pushMetricPoint(); drawMainChart(); updateStats();
+    return;
+  }
+  if (kind === "action") {
+    if (payload.started_at && !payload.completed) {
+      state.t0 = payload.started_at;
+      const id = (payload.action || "").split(":")[0];
+      state.lastCompleted = id;
+    }
+    if (payload.completed) {
+      $$(".chaos-action").forEach(c => c.classList.remove("running"));
+      const justFinished = state.lastCompleted;
+      state.actionInFlight = null;
+      if (state.settings.edu && justFinished && state.explainers?.actions[justFinished]) {
+        setTimeout(() => openEduPanel(justFinished), 800);
+      }
+      beep(523, 0.08, 0.05);
+      setTimeout(() => beep(659, 0.06, 0.04), 80);
+      setTimeout(() => { state.t0 = null; }, 5000);
+    } else {
+      beep(180, 0.05, 0.04);
+    }
+  }
+  if (kind === "scenario") {
+    if (payload.completed) { state.actionInFlight = null; toast("Scenario complete: " + payload.name, "success"); }
+  }
+  if (kind === "narration") {
+    if (payload.matched) {
+      const m = state.narration.find(n => n.text.trim() === payload.text.trim());
+      if (m) m.matched = true; else state.narration.push({ text: payload.text, matched: true });
+    } else {
+      state.narration.push({ text: payload.text, matched: false });
+    }
+    renderNarration();
+  }
+  state.events.unshift(ev);
+  if (state.events.length > 500) state.events.length = 500;
+  $("#stat-events").innerHTML = `<b>${state.events.length}</b> events`;
+  renderTimeline();
+}
+
+function updateStats() {
+  if (!state.snapshot?.services) return;
+  const services = Object.values(state.snapshot.services);
+  const healthy = services.filter(s => s.healthy).length;
+  $("#stat-uptime").innerHTML = `<b>${Math.round((healthy/services.length) * 100)}%</b> avg health`;
+  const actionEvents = state.events.filter(e => e.kind === "action" && !e.payload?.completed).length;
+  $("#stat-actions").innerHTML = `<b>${actionEvents}</b> chaos events`;
+}
+
+function updateAnchor() {
+  const el = $("#t-anchor");
+  if (state.t0) {
+    const dt = (Date.now() / 1000) - state.t0;
+    el.textContent = `T+${dt.toFixed(1)}s`;
+    el.classList.add("live");
+  } else {
+    el.textContent = "idle";
+    el.classList.remove("live");
+  }
+}
+
+async function loadExplainers() {
+  try {
+    const r = await fetch(CONTROLLER + "/explainers");
+    state.explainers = await r.json();
+    renderScenarios();
+  } catch (e) { console.warn("could not load explainers", e); }
+}
+
+$$(".action-tab").forEach(t => {
+  t.addEventListener("click", () => {
+    $$(".action-tab").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    const target = t.dataset.tab;
+    $("#tab-actions").style.display = target === "actions" ? "" : "none";
+    $("#tab-scenarios").style.display = target === "scenarios" ? "" : "none";
+  });
+});
+$$(".chart-tab").forEach(t => {
+  t.addEventListener("click", () => {
+    $$(".chart-tab").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    state.currentMetric = t.dataset.metric;
+    drawMainChart();
+  });
+});
+$("#search").addEventListener("input", e => { state.filters.search = e.target.value; renderTimeline(); });
+$("#edu-bg").addEventListener("click", closeEduPanel);
+$("#edu-close").addEventListener("click", closeEduPanel);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeEduPanel(); });
+
+const settingsPop = $("#settings-pop");
+$("#btn-settings").addEventListener("click", e => { e.stopPropagation(); settingsPop.classList.toggle("open"); });
+document.addEventListener("click", e => {
+  if (!settingsPop.contains(e.target) && e.target !== $("#btn-settings")) settingsPop.classList.remove("open");
+});
+const setupToggle = (id, key) => {
+  const t = $("#" + id);
+  t.addEventListener("click", () => {
+    state.settings[key] = !state.settings[key];
+    t.classList.toggle("on", state.settings[key]);
+    if (key === "narration") renderNarration();
+    if (key === "anim") renderArchitecture();
+  });
+};
+setupToggle("set-narration", "narration");
+setupToggle("set-edu", "edu");
+setupToggle("set-anim", "anim");
+setupToggle("set-sound", "sound");
+$("#btn-sound").addEventListener("click", () => {
+  state.settings.sound = !state.settings.sound;
+  $("#btn-sound").classList.toggle("active", state.settings.sound);
+  $("#set-sound").classList.toggle("on", state.settings.sound);
+  if (state.settings.sound) beep(440, 0.08);
+});
+$("#btn-present").addEventListener("click", () => {
+  document.body.classList.toggle("presentation");
+  $("#btn-present").classList.toggle("active", document.body.classList.contains("presentation"));
+  setTimeout(() => { renderArchitecture(); drawMainChart(); }, 50);
+});
+
+const tourSeen = localStorage.getItem("chaos-theater-tour");
+$("#btn-tour").addEventListener("click", () => $("#tour-bg").classList.add("open"));
+$("#tour-close").addEventListener("click", () => {
+  $("#tour-bg").classList.remove("open");
+  localStorage.setItem("chaos-theater-tour", "1");
+});
+if (!tourSeen) $("#tour-bg").classList.add("open");
+
+window.addEventListener("resize", () => { renderArchitecture(); drawMainChart(); });
+
+renderActions();
+renderFilters();
+renderChartLegend();
+loadExplainers();
+connect();
+setInterval(updateAnchor, 100);
+setTimeout(drawMainChart, 100);
+
+</script>
+
+</body>
+</html>

@@ -31,7 +31,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: notification-service
-          image: ${ACR_LOGIN_SERVER}/notification-service:latest
+          image: ${ACR_LOGIN_SERVER}/notification-service:${IMAGE_TAG}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8003

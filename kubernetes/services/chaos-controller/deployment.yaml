@@ -1,0 +1,192 @@
+# =============================================================================
+# KUBERNETES: chaos-controller — Deployment + Service + ServiceAccount + Role
+#
+# PURPOSE: The Chaos Theater controller. It exposes:
+#   - GET  /stream         — SSE stream the frontend subscribes to
+#   - POST /chaos/<action> — trigger a real disruption against the cluster
+#
+# IMPORTANT — SECURITY POSTURE:
+# This service has the ability to delete pods and apply NetworkPolicies in
+# the `microservices` namespace. That is a privileged capability. The
+# safeguards in this manifest:
+#
+#   1. Scoped RBAC: ONLY operates inside the `microservices` namespace.
+#      Cannot touch kube-system, monitoring, or any other namespace.
+#
+#   2. Permitted verbs are narrow: delete on pods, patch on deployments
+#      (for scale operations), create/delete on NetworkPolicies.
+#      Crucially: NO permissions on Secrets, ConfigMaps with credentials,
+#      Nodes, ClusterRoles, RoleBindings, or anything outside the target
+#      namespace.
+#
+#   3. Default CHAOS_MODE in production should be `mock` until you're ready
+#      to run real chaos. Live mode requires explicit env var override.
+#
+#   4. Ingress is internal-only by default. Expose via Ingress only when
+#      you want public access to the demonstration dashboard.
+# =============================================================================
+
+# ─── ServiceAccount ─────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaos-controller
+  namespace: microservices
+  labels:
+    app: chaos-controller
+
+---
+# ─── Role (namespace-scoped) ────────────────────────────────────────────────
+# This is the ENTIRE blast radius the controller can have. Anything not listed
+# here is implicitly denied. Edit with care.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaos-controller
+  namespace: microservices
+rules:
+  # Read pods, deployments, replicasets, services, endpoints (for snapshot)
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  # Chaos: delete pods (kill_pod), patch deployments (scale, image rollback)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["patch", "update"]
+  # Chaos: create/delete NetworkPolicies (network_partition)
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "delete"]
+  # Read events for the watch loop
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaos-controller
+  namespace: microservices
+subjects:
+  - kind: ServiceAccount
+    name: chaos-controller
+    namespace: microservices
+roleRef:
+  kind: Role
+  name: chaos-controller
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ─── Service ────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: chaos-controller
+  namespace: microservices
+  labels:
+    app: chaos-controller
+spec:
+  type: ClusterIP
+  selector:
+    app: chaos-controller
+  ports:
+    - name: http
+      port: 8004
+      targetPort: 8004
+
+---
+# ─── Deployment ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaos-controller
+  namespace: microservices
+  labels:
+    app: chaos-controller
+    version: "0.1"
+spec:
+  # Single replica — the controller is stateful in memory (action lock,
+  # current event hub subscriptions). Multi-replica would require external
+  # state and we don't need the throughput.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chaos-controller
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: chaos-controller
+        version: "0.1"
+      annotations:
+        prometheus.io/scrape: "false"
+    spec:
+      serviceAccountName: chaos-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: chaos-controller
+          image: ${ACR_LOGIN_SERVER}/chaos-controller:${IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CHAOS_MODE
+              # Override to "live" only when you actually want real chaos.
+              value: "mock"
+            - name: K8S_NAMESPACE
+              value: "microservices"
+            - name: K8S_IN_CLUSTER
+              value: "true"
+            - name: PROMETHEUS_URL
+              value: "http://prometheus.monitoring:9090"
+            - name: ENVIRONMENT
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: http
+              containerPort: 8004
+          # Conservative resource limits — the controller is mostly idle,
+          # spikes briefly during chaos events. 200m CPU, 256Mi memory is
+          # plenty for the workload described.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
